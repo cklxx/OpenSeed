@@ -118,14 +118,40 @@ def _extract_arxiv_ids(text: str) -> list[str]:
     return list(dict.fromkeys(found))  # deduplicate, preserve order
 
 
-def _display_id_table(arxiv_ids: list[str]) -> None:
+def _parse_md_table(text: str) -> dict[str, dict]:
+    """Parse a markdown table and return {arxiv_id: {title, authors, year, citations}}."""
+    info: dict[str, dict] = {}
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        arxiv_id = re.search(r"\b(\d{4}\.\d{4,5})\b", cells[0])
+        if not arxiv_id:
+            continue
+        aid = arxiv_id.group(1)
+        info[aid] = {
+            "title": cells[1] if len(cells) > 1 else "",
+            "authors": cells[2] if len(cells) > 2 else "",
+            "year": cells[3] if len(cells) > 3 else "",
+            "citations": cells[4] if len(cells) > 4 else "",
+        }
+    return info
+
+
+def _display_id_table(arxiv_ids: list[str], info: dict[str, dict]) -> None:
     from rich.table import Table
 
     table = Table(title="Papers found", show_lines=True)
     table.add_column("#", style="dim", width=4)
-    table.add_column("ArXiv ID", style="cyan")
+    table.add_column("ArXiv ID", style="cyan", width=13)
+    table.add_column("Title", style="bold", max_width=48)
+    table.add_column("Authors", style="dim", max_width=22)
+    table.add_column("Year", justify="right", width=6)
     for i, aid in enumerate(arxiv_ids, 1):
-        table.add_row(str(i), aid)
+        meta = info.get(aid, {})
+        table.add_row(
+            str(i), aid, meta.get("title", ""), meta.get("authors", ""), meta.get("year", "")
+        )
     console.print(table)
 
 
@@ -204,7 +230,7 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
         console.print("[yellow]No ArXiv IDs found. Try a more specific query.[/yellow]")
         return
 
-    _display_id_table(arxiv_ids)
+    _display_id_table(arxiv_ids, _parse_md_table(md_result))
     raw = click.prompt("\nSelect papers to analyze (e.g. 1,3 or 1-10 or all, q to quit)")
     if raw.strip().lower() == "q":
         return
