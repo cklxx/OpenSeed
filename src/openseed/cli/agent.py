@@ -164,10 +164,10 @@ def _analyze_and_save(
             progress.update(task_id, description=f"[cyan]{msg}[/cyan]")
 
     _step(f"Summarizing '{paper.title[:35]}…'")
-    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn)
+    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn, on_step=_step)
 
     _step(f"Tagging '{paper.title[:35]}…'")
-    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model)]
+    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model, on_step=_step)]
 
     added = lib.add_paper(paper)
     if not added:
@@ -189,8 +189,14 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
     config = ctx.obj["config"]
     lib = _get_library(ctx)
 
-    with console.status(f"[cyan]Searching '{query}' (target {count} papers)…[/cyan]"):
-        md_result = search_papers_agent(query, model=config.default_model, count=count)
+    with console.status("[cyan]Searching…[/cyan]") as status:
+
+        def _on_search_step(label: str) -> None:
+            status.update(f"[cyan]{label}[/cyan]")
+
+        md_result = search_papers_agent(
+            query, model=config.default_model, count=count, on_step=_on_search_step
+        )
     console.print(Panel(Markdown(md_result), title=f"Search: {query}", border_style="cyan"))
 
     arxiv_ids = _extract_arxiv_ids(md_result)

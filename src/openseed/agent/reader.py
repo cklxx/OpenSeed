@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 
 import httpx
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk.types import AssistantMessage, ToolUseBlock
 
 
 def _make_opts(model: str, system: str) -> ClaudeAgentOptions:
@@ -19,15 +21,33 @@ def _make_opts(model: str, system: str) -> ClaudeAgentOptions:
     return opts
 
 
-async def _ask_async(model: str, system: str, prompt: str) -> str:
+def _tool_label(block: ToolUseBlock) -> str:
+    """Return a short human-readable label for a tool call."""
+    name = block.name
+    inp = block.input
+    if name == "WebSearch":
+        return f"WebSearch: {inp.get('query', '')[:60]}"
+    if name == "WebFetch":
+        url = inp.get("url", "")
+        return f"WebFetch: {url[:60]}"
+    return name
+
+
+async def _ask_async(
+    model: str, system: str, prompt: str, on_step: Callable[[str], None] | None = None
+) -> str:
     result = ""
     async for msg in query(prompt=prompt, options=_make_opts(model, system)):
+        if isinstance(msg, AssistantMessage) and on_step:
+            for block in msg.content:
+                if isinstance(block, ToolUseBlock):
+                    on_step(_tool_label(block))
         if isinstance(msg, ResultMessage):
             result = msg.result or ""
     return result
 
 
-def _ask(model: str, system: str, prompt: str) -> str:
+def _ask(model: str, system: str, prompt: str, on_step: Callable[[str], None] | None = None) -> str:
     # Suppress the noisy anyio cancel-scope cleanup RuntimeError emitted by
     # claude-agent-sdk when the async generator exits early (cosmetic only).
     def _silence_cancel_scope(loop: asyncio.AbstractEventLoop, ctx: dict) -> None:
@@ -39,12 +59,14 @@ def _ask(model: str, system: str, prompt: str) -> str:
     loop = asyncio.new_event_loop()
     loop.set_exception_handler(_silence_cancel_scope)
     try:
-        return loop.run_until_complete(_ask_async(model, system, prompt))
+        return loop.run_until_complete(_ask_async(model, system, prompt, on_step))
     finally:
         loop.close()
 
 
-def auto_tag_paper(text: str, model: str) -> list[str]:
+def auto_tag_paper(
+    text: str, model: str, on_step: Callable[[str], None] | None = None
+) -> list[str]:
     """Generate 3-5 concise tags for a paper."""
     result = _ask(
         model,
@@ -150,7 +172,12 @@ def search_papers_ranked(search_query: str, model: str, count: int = 10) -> list
     return enrich_citations(discover_papers(search_query, model, count))
 
 
-def search_papers_agent(search_query: str, model: str, count: int = 10) -> str:
+def search_papers_agent(
+    search_query: str,
+    model: str,
+    count: int = 10,
+    on_step: Callable[[str], None] | None = None,
+) -> str:
     """Deep search using Claude web access — rich markdown output for pipeline command."""
     system = (
         "You are a research paper discovery assistant with web search access. "
@@ -161,7 +188,7 @@ def search_papers_agent(search_query: str, model: str, count: int = 10) -> str:
         "Prioritize highly-cited papers. Use multiple searches to reach the target count. "
         "End with a ~150-word summary of key trends in this research area."
     )
-    return _ask(model, system, f"Find {count} papers about: {search_query}")
+    return _ask(model, system, f"Find {count} papers about: {search_query}", on_step=on_step)
 
 
 class PaperReader:
@@ -170,7 +197,9 @@ class PaperReader:
     def __init__(self, model: str = "claude-opus-4-6") -> None:
         self._model = model
 
-    def summarize_paper(self, text: str, cn: bool = False) -> str:
+    def summarize_paper(
+        self, text: str, cn: bool = False, on_step: Callable[[str], None] | None = None
+    ) -> str:
         """Generate a structured markdown summary of a paper."""
         if cn:
             system = (
@@ -183,7 +212,7 @@ class PaperReader:
                 "one-liner, ## Key Contributions (bullets), ## Methodology, "
                 "## Limitations, **Relevance Score:** N/10."
             )
-        return _ask(self._model, system, f"Summarize this paper:\n\n{text}")
+        return _ask(self._model, system, f"Summarize this paper:\n\n{text}", on_step=on_step)
 
     def extract_key_findings(self, text: str) -> list[str]:
         """Extract key findings as a list."""
