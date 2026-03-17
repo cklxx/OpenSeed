@@ -34,7 +34,9 @@ def _extract_page_blocks(page) -> list[dict]:
                 continue
             text = "".join(s["text"] for s in spans).strip()
             if text:
-                result.append({"text": text, "size": max(s["size"] for s in spans), "bbox": block["bbox"]})
+                result.append(
+                    {"text": text, "size": max(s["size"] for s in spans), "bbox": block["bbox"]}
+                )
     return result
 
 
@@ -120,7 +122,9 @@ def _handle_body(text: str, md_lines: list[str], state: dict) -> None:
         md_lines.append(text)
 
 
-def _process_block(block: dict, title_size: float, median_size: float, md_lines: list[str], state: dict) -> None:
+def _process_block(
+    block: dict, title_size: float, median_size: float, md_lines: list[str], state: dict
+) -> None:
     """Route a single block to the appropriate handler."""
     text, size = block["text"], block["size"]
     classification = _classify_block(block, median_size)
