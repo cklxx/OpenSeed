@@ -10,6 +10,8 @@ import click
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.table import Table
 
 from openseed.agent.assistant import ResearchAssistant
 from openseed.agent.reader import (
@@ -20,16 +22,12 @@ from openseed.agent.reader import (
     synthesize_papers,
 )
 from openseed.auth import has_anthropic_auth
+from openseed.cli._helpers import get_config, get_library, require_paper
 from openseed.models.paper import Tag
 from openseed.services.arxiv import fetch_paper_metadata
 from openseed.storage.library import PaperLibrary
 
 console = Console()
-
-
-def _get_library(ctx: click.Context) -> PaperLibrary:
-    config = ctx.obj["config"]
-    return PaperLibrary(config.library_dir)
 
 
 def _require_auth() -> None:
@@ -55,9 +53,8 @@ def agent(ctx: click.Context) -> None:
 def ask(ctx: click.Context, question: str) -> None:
     """Ask a research question."""
     _require_auth()
-    config = ctx.obj["config"]
-    assistant = ResearchAssistant(model=config.default_model)
-    answer = assistant.ask(question)
+    config = get_config(ctx)
+    answer = ResearchAssistant(model=config.default_model).ask(question)
     console.print(Panel(Markdown(answer), title="Answer", border_style="blue"))
 
 
@@ -68,21 +65,14 @@ def ask(ctx: click.Context, question: str) -> None:
 def summarize(ctx: click.Context, paper_id: str, cn: bool) -> None:
     """Summarize a paper using AI."""
     _require_auth()
-    lib = _get_library(ctx)
-    p = lib.get_paper(paper_id)
-    if not p:
-        console.print(f"[red]Paper {paper_id} not found.[/red]")
-        raise SystemExit(1)
-
-    config = ctx.obj["config"]
+    lib = get_library(ctx)
+    p = require_paper(lib, paper_id)
+    config = get_config(ctx)
     reader = PaperReader(model=config.default_model)
-    summary = reader.summarize_paper(p.abstract or p.title, cn=cn)
-
-    p.summary = summary
+    p.summary = reader.summarize_paper(p.abstract or p.title, cn=cn)
     lib.update_paper(p)
     md_path = lib.save_summary(p)
-
-    console.print(Panel(Markdown(summary), title=f"Summary: {p.title}", border_style="green"))
+    console.print(Panel(Markdown(p.summary), title=f"Summary: {p.title}", border_style="green"))
     console.print(f"[dim]Saved → {md_path}[/dim]")
 
 
@@ -92,7 +82,7 @@ def summarize(ctx: click.Context, paper_id: str, cn: bool) -> None:
 def search(ctx: click.Context, query: str) -> None:
     """Intelligently search for papers using AI."""
     _require_auth()
-    config = ctx.obj["config"]
+    config = get_config(ctx)
     with console.status(f"[cyan]Searching for '{query}'…[/cyan]"):
         result = search_papers_agent(query, model=config.default_model)
     console.print(Panel(Markdown(result), title=f"Search: {query}", border_style="cyan"))
@@ -104,47 +94,38 @@ def search(ctx: click.Context, query: str) -> None:
 def review(ctx: click.Context, paper_id: str) -> None:
     """Generate an AI review of a paper."""
     _require_auth()
-    lib = _get_library(ctx)
-    p = lib.get_paper(paper_id)
-    if not p:
-        console.print(f"[red]Paper {paper_id} not found.[/red]")
-        raise SystemExit(1)
-
-    config = ctx.obj["config"]
-    assistant = ResearchAssistant(model=config.default_model)
-    review_text = assistant.review_paper(p)
-
+    lib = get_library(ctx)
+    p = require_paper(lib, paper_id)
+    config = get_config(ctx)
+    review_text = ResearchAssistant(model=config.default_model).review_paper(p)
     console.print(Panel(Markdown(review_text), title=f"Review: {p.title}", border_style="yellow"))
 
 
 def _extract_arxiv_ids(text: str) -> list[str]:
     found = re.findall(r"\b(\d{4}\.\d{4,5})\b", text)
-    return list(dict.fromkeys(found))  # deduplicate, preserve order
+    return list(dict.fromkeys(found))
 
 
 def _parse_md_table(text: str) -> dict[str, dict]:
-    """Parse a markdown table and return {arxiv_id: {title, authors, year, citations}}."""
+    """Parse markdown table → {arxiv_id: {title, authors, year, citations}}."""
     info: dict[str, dict] = {}
     for line in text.splitlines():
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 2:
             continue
-        arxiv_id = re.search(r"\b(\d{4}\.\d{4,5})\b", cells[0])
-        if not arxiv_id:
+        m = re.search(r"\b(\d{4}\.\d{4,5})\b", cells[0])
+        if not m:
             continue
-        aid = arxiv_id.group(1)
+        aid = m.group(1)
         info[aid] = {
             "title": cells[1] if len(cells) > 1 else "",
             "authors": cells[2] if len(cells) > 2 else "",
             "year": cells[3] if len(cells) > 3 else "",
-            "citations": cells[4] if len(cells) > 4 else "",
         }
     return info
 
 
 def _display_id_table(arxiv_ids: list[str], info: dict[str, dict]) -> None:
-    from rich.table import Table
-
     table = Table(title="Papers found", show_lines=True)
     table.add_column("#", style="dim", width=4)
     table.add_column("ArXiv ID", style="cyan", width=13)
@@ -168,9 +149,7 @@ def _parse_selection(raw: str, count: int) -> list[int]:
         if "-" in part:
             lo, _, hi = part.partition("-")
             try:
-                for i in range(int(lo) - 1, int(hi)):
-                    if 0 <= i < count:
-                        indices.append(i)
+                indices.extend(i for i in range(int(lo) - 1, int(hi)) if 0 <= i < count)
             except ValueError:
                 pass
         else:
@@ -183,24 +162,25 @@ def _parse_selection(raw: str, count: int) -> list[int]:
     return indices
 
 
-def _analyze_and_save(
-    paper, model: str, lib: PaperLibrary, progress=None, task_id=None, cn: bool = False
-) -> None:
-    """Run summary + auto-tag pipeline on a paper and save it."""
-    text = paper.abstract or paper.title
-
+def _make_step(progress, task_id) -> callable:
     def _step(msg: str) -> None:
         if progress and task_id is not None:
             progress.update(task_id, description=f"[cyan]{msg}[/cyan]")
 
-    _step(f"Summarizing '{paper.title[:35]}…'")
-    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn, on_step=_step)
+    return _step
 
-    _step(f"Tagging '{paper.title[:35]}…'")
-    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model, on_step=_step)]
 
-    added = lib.add_paper(paper)
-    if not added:
+def _analyze_and_save(
+    paper, model: str, lib: PaperLibrary, progress=None, task_id=None, cn: bool = False
+) -> None:
+    """Summarize + tag + save a paper."""
+    text = paper.abstract or paper.title
+    step = _make_step(progress, task_id)
+    step(f"Summarizing '{paper.title[:35]}…'")
+    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn, on_step=step)
+    step(f"Tagging '{paper.title[:35]}…'")
+    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model, on_step=step)]
+    if not lib.add_paper(paper):
         console.print(f"[yellow]Skipped (already exists)[/yellow] {paper.title}")
         return
     md_path = lib.save_summary(paper)
@@ -211,44 +191,16 @@ def _analyze_and_save(
     console.print(f"[dim]Saved → {md_path}[/dim]")
 
 
-@agent.command()
-@click.argument("query")
-@click.option("--count", default=20, show_default=True, help="Number of papers to search for.")
-@click.pass_context
-def pipeline(ctx: click.Context, query: str, count: int) -> None:
-    """Search → select → auto-analyze and save (with citation counts)."""
-    _require_auth()
-    config = ctx.obj["config"]
-    lib = _get_library(ctx)
-
+def _search_with_status(query: str, model: str, count: int) -> str:
     with console.status("[cyan]Searching…[/cyan]") as status:
 
-        def _on_search_step(label: str) -> None:
+        def _on_step(label: str) -> None:
             status.update(f"[cyan]{label}[/cyan]")
 
-        md_result = search_papers_agent(
-            query, model=config.default_model, count=count, on_step=_on_search_step
-        )
-    console.print(Panel(Markdown(md_result), title=f"Search: {query}", border_style="cyan"))
+        return search_papers_agent(query, model=model, count=count, on_step=_on_step)
 
-    arxiv_ids = _extract_arxiv_ids(md_result)
-    if not arxiv_ids:
-        console.print("[yellow]No ArXiv IDs found. Try a more specific query.[/yellow]")
-        return
 
-    _display_id_table(arxiv_ids, _parse_md_table(md_result))
-    raw = click.prompt("\nSelect papers to analyze (e.g. 1,3 or 1-10 or all, q to quit)")
-    if raw.strip().lower() == "q":
-        return
-
-    selected_ids = [arxiv_ids[i] for i in _parse_selection(raw, len(arxiv_ids))]
-    if not selected_ids:
-        console.print("[yellow]Invalid selection.[/yellow]")
-        return
-
-    from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
-
-    console.print()
+def _pipeline_loop(selected_ids: list[str], model: str, lib: PaperLibrary) -> None:
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -260,7 +212,6 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
     ) as progress:
         overall = progress.add_task("[bold]Pipeline[/bold]", total=len(selected_ids))
         paper_task = progress.add_task("", total=2)
-
         for arxiv_id in selected_ids:
             progress.update(
                 paper_task, description=f"[cyan]Fetching {arxiv_id}…[/cyan]", completed=0
@@ -272,11 +223,36 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
                 progress.advance(overall)
                 continue
             progress.advance(paper_task)
-            _analyze_and_save(
-                paper, config.default_model, lib, progress=progress, task_id=paper_task
-            )
+            _analyze_and_save(paper, model, lib, progress=progress, task_id=paper_task)
             progress.advance(paper_task)
             progress.advance(overall)
+
+
+@agent.command()
+@click.argument("query")
+@click.option("--count", default=20, show_default=True, help="Number of papers to search for.")
+@click.pass_context
+def pipeline(ctx: click.Context, query: str, count: int) -> None:
+    """Search → select → auto-analyze and save (with citation counts)."""
+    _require_auth()
+    config = get_config(ctx)
+    lib = get_library(ctx)
+    md_result = _search_with_status(query, config.default_model, count)
+    console.print(Panel(Markdown(md_result), title=f"Search: {query}", border_style="cyan"))
+    arxiv_ids = _extract_arxiv_ids(md_result)
+    if not arxiv_ids:
+        console.print("[yellow]No ArXiv IDs found. Try a more specific query.[/yellow]")
+        return
+    _display_id_table(arxiv_ids, _parse_md_table(md_result))
+    raw = click.prompt("\nSelect papers to analyze (e.g. 1,3 or 1-10 or all, q to quit)")
+    if raw.strip().lower() == "q":
+        return
+    selected_ids = [arxiv_ids[i] for i in _parse_selection(raw, len(arxiv_ids))]
+    if not selected_ids:
+        console.print("[yellow]Invalid selection.[/yellow]")
+        return
+    console.print()
+    _pipeline_loop(selected_ids, config.default_model, lib)
 
 
 @agent.command()
@@ -285,15 +261,12 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
 def synthesize(ctx: click.Context, paper_ids: tuple[str, ...]) -> None:
     """Compare and synthesize findings across multiple papers."""
     _require_auth()
-    lib = _get_library(ctx)
-    texts = []
-    for pid in paper_ids:
-        p = lib.get_paper(pid)
-        if not p:
-            console.print(f"[red]Paper {pid} not found.[/red]")
-            raise SystemExit(1)
-        texts.append(f"Title: {p.title}\n\n{p.summary or p.abstract or p.title}")
-    config = ctx.obj["config"]
+    lib = get_library(ctx)
+    texts = [
+        f"Title: {(p := require_paper(lib, pid)).title}\n\n{p.summary or p.abstract or p.title}"
+        for pid in paper_ids
+    ]
+    config = get_config(ctx)
     with console.status("[cyan]Synthesizing…[/cyan]"):
         result = synthesize_papers(texts, config.default_model)
     console.print(Panel(Markdown(result), title="Synthesis", border_style="cyan"))
@@ -328,12 +301,9 @@ def _save_codegen(lib, p, dest: Path, code: str) -> None:
 def codegen(ctx: click.Context, paper_id: str, out_path: str | None) -> None:
     """Generate experiment code for a paper and save to file."""
     _require_auth()
-    lib = _get_library(ctx)
-    p = lib.get_paper(paper_id)
-    if not p:
-        console.print(f"[red]Paper {paper_id} not found.[/red]")
-        raise SystemExit(1)
-    config = ctx.obj["config"]
+    lib = get_library(ctx)
+    p = require_paper(lib, paper_id)
+    config = get_config(ctx)
     dest = _resolve_codegen_path(config, p.id, out_path)
     text = f"Title: {p.title}\n\n{p.abstract or ''}\n\n{p.summary or ''}"
     with console.status("[cyan]Generating experiment code…[/cyan]"):
