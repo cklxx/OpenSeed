@@ -50,3 +50,20 @@ class Paper(BaseModel):
     added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     summary: str | None = None
     status: Literal["unread", "reading", "read", "archived"] = "unread"
+    note: str = ""
+    experiment_path: str | None = None
+
+
+def paper_to_bibtex(p: Paper) -> str:
+    key = (p.arxiv_id or p.id).replace(".", "")
+    year = str(p.added_at.year)
+    authors = " and ".join(a.name for a in p.authors) if p.authors else "Unknown"
+    return (
+        f"@article{{{key},\n"
+        f"  title         = {{{p.title}}},\n"
+        f"  author        = {{{authors}}},\n"
+        f"  year          = {{{year}}},\n"
+        f"  archivePrefix = {{arXiv}},\n"
+        f"  eprint        = {{{p.arxiv_id or ''}}},\n"
+        f"}}"
+    )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 
 import click
@@ -11,7 +12,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from openseed.agent.reader import discover_papers, enrich_citations
-from openseed.models.paper import Paper, Tag
+from openseed.models.paper import Paper, Tag, paper_to_bibtex
+from openseed.models.watch import ArxivWatch
 from openseed.services.arxiv import (
     download_pdf,
     fetch_paper_metadata,
@@ -279,3 +281,159 @@ def status(ctx: click.Context, paper_id: str, new_status: str) -> None:
     p.status = new_status  # type: ignore[assignment]
     lib.update_paper(p)
     console.print(f"[green]✓[/green] Status updated to '{new_status}'")
+
+
+@paper.command("next")
+@click.pass_context
+def next_paper(ctx: click.Context) -> None:
+    """Show the oldest unread paper and mark it as reading."""
+    lib = _get_library(ctx)
+    unread = [p for p in lib.list_papers() if p.status == "unread"]
+    if not unread:
+        console.print("[dim]No unread papers.[/dim]")
+        return
+    p = min(unread, key=lambda x: x.added_at)
+    p.status = "reading"
+    lib.update_paper(p)
+    authors = ", ".join(a.name for a in p.authors) if p.authors else "Unknown"
+    excerpt = p.abstract[:300] if p.abstract else ""
+    console.print(
+        Panel(
+            f"[bold]{p.title}[/bold]\n{authors}\n\n{excerpt}",
+            title=f"Now reading · {p.id}",
+            border_style="cyan",
+        )
+    )
+
+
+@paper.command("done")
+@click.argument("paper_id")
+@click.option("--note", default="", help="Reading note to save.")
+@click.pass_context
+def done(ctx: click.Context, paper_id: str, note: str) -> None:
+    """Mark a paper as read and optionally save a note."""
+    lib = _get_library(ctx)
+    p = lib.get_paper(paper_id)
+    if not p:
+        console.print(f"[red]Paper {paper_id} not found.[/red]")
+        raise SystemExit(1)
+    p.status = "read"
+    if note:
+        p.note = note
+    lib.update_paper(p)
+    console.print(f"[green]✓[/green] Marked [bold]{p.title}[/bold] as read")
+
+
+@paper.command("export")
+@click.argument("paper_ids", nargs=-1, required=True)
+@click.option("--format", "fmt", type=click.Choice(["bibtex"]), default="bibtex", show_default=True)
+@click.option("--output", "out_path", default=None, help="Write to file instead of stdout.")
+@click.pass_context
+def export(ctx: click.Context, paper_ids: tuple[str, ...], fmt: str, out_path: str | None) -> None:
+    """Export papers to BibTeX (or other formats)."""
+    lib = _get_library(ctx)
+    entries = []
+    for pid in paper_ids:
+        p = lib.get_paper(pid)
+        if not p:
+            console.print(f"[red]Paper {pid} not found.[/red]")
+            raise SystemExit(1)
+        entries.append(paper_to_bibtex(p))
+    content = "\n\n".join(entries)
+    if out_path:
+        Path(out_path).write_text(content)
+        n = len(entries)
+        console.print(f"[green]✓[/green] Wrote {n} entr{'y' if n == 1 else 'ies'} to {out_path}")
+    else:
+        console.print(content)
+
+
+def _arxiv_year(arxiv_id: str | None) -> int | None:
+    if not arxiv_id:
+        return None
+    m = re.match(r"^(\d{2})\d{2}\.", arxiv_id)
+    return (2000 + int(m.group(1))) if m else None
+
+
+@paper.group("watch")
+def watch_group() -> None:
+    """Manage arXiv paper watches."""
+
+
+@watch_group.command("add")
+@click.argument("query")
+@click.option("--since", "since_year", default=None, type=int, metavar="YEAR", help="Min year.")
+@click.pass_context
+def watch_add(ctx: click.Context, query: str, since_year: int | None) -> None:
+    """Add a new arXiv watch query."""
+    lib = _get_library(ctx)
+    w = ArxivWatch(query=query, since_year=since_year)
+    lib.add_watch(w)
+    since_str = f" (since {since_year})" if since_year else ""
+    console.print(f"[green]✓[/green] Watch '{query}'{since_str} added (id: {w.id})")
+
+
+@watch_group.command("list")
+@click.pass_context
+def watch_list(ctx: click.Context) -> None:
+    """List all watches."""
+    lib = _get_library(ctx)
+    watches = lib.list_watches()
+    if not watches:
+        console.print("[dim]No watches configured.[/dim]")
+        return
+    table = Table(title="Watches", show_lines=True)
+    table.add_column("ID", style="cyan", width=12)
+    table.add_column("Query", style="bold")
+    table.add_column("Since", width=6)
+    table.add_column("Last run", width=20)
+    for w in watches:
+        last = w.last_run.strftime("%Y-%m-%d %H:%M") if w.last_run else "never"
+        table.add_row(w.id, w.query, str(w.since_year or ""), last)
+    console.print(table)
+
+
+@watch_group.command("remove")
+@click.argument("watch_id")
+@click.pass_context
+def watch_remove(ctx: click.Context, watch_id: str) -> None:
+    """Remove a watch by ID."""
+    lib = _get_library(ctx)
+    if lib.remove_watch(watch_id):
+        console.print(f"[green]✓[/green] Removed watch {watch_id}")
+    else:
+        console.print(f"[red]Watch {watch_id} not found.[/red]")
+        raise SystemExit(1)
+
+
+def _run_watch(lib, w: ArxivWatch) -> None:
+    from datetime import UTC, datetime
+
+    from openseed.services.arxiv import search_papers
+
+    console.print(f"\n[bold cyan]Watch:[/bold cyan] '{w.query}'")
+    papers = search_papers(w.query, max_results=20)
+    results = [
+        p for p in papers if w.since_year is None or (_arxiv_year(p.arxiv_id) or 0) >= w.since_year
+    ]
+    w.last_run = datetime.now(UTC)
+    lib.update_watch(w)
+    if not results:
+        console.print("  [dim]No results.[/dim]")
+        return
+    for p in results:
+        year = _arxiv_year(p.arxiv_id) or ""
+        console.print(f"  [{year}] [bold]{p.title}[/bold]  [dim]{p.arxiv_id}[/dim]")
+
+
+@watch_group.command("run")
+@click.pass_context
+def watch_run(ctx: click.Context) -> None:
+    """Run all watches and show new papers."""
+    lib = _get_library(ctx)
+    watches = lib.list_watches()
+    if not watches:
+        console.print("[dim]No watches configured.[/dim]")
+        return
+    for w in watches:
+        _run_watch(lib, w)

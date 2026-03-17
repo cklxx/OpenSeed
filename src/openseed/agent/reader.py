@@ -215,6 +215,16 @@ def search_papers_agent(
     return _ask(model, system, f"Find {count} papers about: {search_query}", on_step=on_step)
 
 
+def synthesize_papers(texts: list[str], model: str) -> str:
+    """Compare multiple papers: shared themes, methodology, differences, synthesis."""
+    system = (
+        "You are a research synthesis expert. Compare the provided papers and output markdown: "
+        "## Shared Themes, ## Methodology Comparison, ## Key Differences, ## Synthesis."
+    )
+    body = "\n\n---\n\n".join(f"Paper {i + 1}:\n{t}" for i, t in enumerate(texts))
+    return _ask(model, system, f"Synthesize these papers:\n\n{body}")
+
+
 class PaperReader:
     """Reads and analyzes papers using Claude via claude-agent-sdk."""
 

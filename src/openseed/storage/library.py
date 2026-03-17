@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openseed.models.experiment import Experiment
 from openseed.models.paper import Paper
+from openseed.models.watch import ArxivWatch
 
 
 class PaperLibrary:
@@ -18,12 +19,15 @@ class PaperLibrary:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._papers_path = self._dir / "papers.json"
         self._experiments_path = self._dir / "experiments.json"
+        self._watches_path = self._dir / "watches.json"
         self._papers_cache: list[Paper] | None = None
         self._experiments_cache: list[Experiment] | None = None
+        self._watches_cache: list[ArxivWatch] | None = None
 
     def _invalidate_cache(self) -> None:
         self._papers_cache = None
         self._experiments_cache = None
+        self._watches_cache = None
 
     # ── Papers ────────────────────────────────────────────────
 
@@ -126,6 +130,49 @@ class PaperLibrary:
         if len(filtered) == len(experiments):
             return False
         self._save_experiments(filtered)
+        return True
+
+    # ── Watches ───────────────────────────────────────────────
+
+    def _load_watches(self) -> list[ArxivWatch]:
+        if self._watches_cache is not None:
+            return self._watches_cache
+        if not self._watches_path.exists():
+            return []
+        data = json.loads(self._watches_path.read_text())
+        self._watches_cache = [ArxivWatch.model_validate(d) for d in data]
+        return self._watches_cache
+
+    def _save_watches(self, watches: list[ArxivWatch]) -> None:
+        self._atomic_write(
+            self._watches_path,
+            json.dumps([w.model_dump(mode="json") for w in watches], indent=2, default=str),
+        )
+        self._watches_cache = watches
+
+    def add_watch(self, watch: ArxivWatch) -> None:
+        watches = self._load_watches()
+        watches.append(watch)
+        self._save_watches(watches)
+
+    def list_watches(self) -> list[ArxivWatch]:
+        return self._load_watches()
+
+    def update_watch(self, watch: ArxivWatch) -> None:
+        watches = self._load_watches()
+        for i, w in enumerate(watches):
+            if w.id == watch.id:
+                watches[i] = watch
+                self._save_watches(watches)
+                return
+        raise KeyError(f"Watch {watch.id} not found")
+
+    def remove_watch(self, watch_id: str) -> bool:
+        watches = self._load_watches()
+        filtered = [w for w in watches if w.id != watch_id]
+        if len(filtered) == len(watches):
+            return False
+        self._save_watches(filtered)
         return True
 
     # ── Helpers ───────────────────────────────────────────────

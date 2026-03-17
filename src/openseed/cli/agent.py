@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -16,6 +17,7 @@ from openseed.agent.reader import (
     auto_tag_paper,
     generate_experiment_code,
     search_papers_agent,
+    synthesize_papers,
 )
 from openseed.auth import has_anthropic_auth
 from openseed.models.paper import Tag
@@ -274,21 +276,37 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
 
 
 @agent.command()
-@click.argument("paper_id")
+@click.argument("paper_ids", nargs=-1, required=True)
 @click.pass_context
-def codegen(ctx: click.Context, paper_id: str) -> None:
-    """Generate experiment code for a paper."""
+def synthesize(ctx: click.Context, paper_ids: tuple[str, ...]) -> None:
+    """Compare and synthesize findings across multiple papers."""
     _require_auth()
     lib = _get_library(ctx)
-    p = lib.get_paper(paper_id)
-    if not p:
-        console.print(f"[red]Paper {paper_id} not found.[/red]")
-        raise SystemExit(1)
-
+    texts = []
+    for pid in paper_ids:
+        p = lib.get_paper(pid)
+        if not p:
+            console.print(f"[red]Paper {pid} not found.[/red]")
+            raise SystemExit(1)
+        texts.append(f"Title: {p.title}\n\n{p.summary or p.abstract or p.title}")
     config = ctx.obj["config"]
-    text = f"Title: {p.title}\n\n{p.abstract or ''}\n\n{p.summary or ''}"
-    with console.status("[cyan]Generating experiment code…[/cyan]"):
-        code = generate_experiment_code(text, config.default_model)
+    with console.status("[cyan]Synthesizing…[/cyan]"):
+        result = synthesize_papers(texts, config.default_model)
+    console.print(Panel(Markdown(result), title="Synthesis", border_style="cyan"))
+
+
+def _resolve_codegen_path(config, paper_id: str, out_path: str | None) -> Path:
+    if out_path:
+        return Path(out_path)
+    experiments_dir = Path(config.config_dir) / "experiments"
+    experiments_dir.mkdir(parents=True, exist_ok=True)
+    return experiments_dir / f"{paper_id}.py"
+
+
+def _save_codegen(lib, p, dest: Path, code: str) -> None:
+    dest.write_text(code)
+    p.experiment_path = str(dest)
+    lib.update_paper(p)
     console.print(
         Panel(
             Markdown(f"```python\n{code}\n```"),
@@ -296,3 +314,24 @@ def codegen(ctx: click.Context, paper_id: str) -> None:
             border_style="magenta",
         )
     )
+    console.print(f"[green]✓[/green] Saved to [bold]{dest}[/bold]")
+
+
+@agent.command()
+@click.argument("paper_id")
+@click.option("--output", "out_path", default=None, help="Output .py path.")
+@click.pass_context
+def codegen(ctx: click.Context, paper_id: str, out_path: str | None) -> None:
+    """Generate experiment code for a paper and save to file."""
+    _require_auth()
+    lib = _get_library(ctx)
+    p = lib.get_paper(paper_id)
+    if not p:
+        console.print(f"[red]Paper {paper_id} not found.[/red]")
+        raise SystemExit(1)
+    config = ctx.obj["config"]
+    dest = _resolve_codegen_path(config, p.id, out_path)
+    text = f"Title: {p.title}\n\n{p.abstract or ''}\n\n{p.summary or ''}"
+    with console.status("[cyan]Generating experiment code…[/cyan]"):
+        code = generate_experiment_code(text, config.default_model)
+    _save_codegen(lib, p, dest, code)
