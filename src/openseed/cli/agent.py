@@ -121,7 +121,7 @@ def _extract_arxiv_ids(text: str) -> list[str]:
 def _display_id_table(arxiv_ids: list[str]) -> None:
     from rich.table import Table
 
-    table = Table(title="Papers found", show_lines=False)
+    table = Table(title="Papers found", show_lines=True)
     table.add_column("#", style="dim", width=4)
     table.add_column("ArXiv ID", style="cyan")
     for i, aid in enumerate(arxiv_ids, 1):
