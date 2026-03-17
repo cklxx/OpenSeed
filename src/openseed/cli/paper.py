@@ -59,10 +59,11 @@ def _arxiv_year(arxiv_id: str | None) -> int | None:
     return (2000 + int(m.group(1))) if m else None
 
 
-def _score_bar(score: float, max_score: float, width: int = 12) -> str:
+def _score_bar(score: float, max_score: float, width: int = 10) -> str:
     ratio = min(score / max_score, 1.0) if max_score else 0.0
     filled = round(ratio * width)
-    return f"[green]{'█' * filled}[/green][dim]{'░' * (width - filled)}[/dim]"
+    bar = f"[green]{'█' * filled}[/green][dim]{'░' * (width - filled)}[/dim]"
+    return f"[yellow]{score:5.1f}[/yellow] {bar}"
 
 
 def _year_chart(results: list[dict]) -> Table | None:
@@ -87,7 +88,7 @@ def _build_search_table(results: list[dict], since: int | None) -> Table:
     table.add_column("#", style="dim", width=4)
     table.add_column("Title", style="bold", max_width=38)
     table.add_column("Relevance", max_width=28)
-    table.add_column("Rank", width=14, no_wrap=True)
+    table.add_column("Rank", width=18, no_wrap=True)
     table.add_column("Year", justify="right", width=6)
     table.add_column("Cite", justify="right", width=7)
     table.add_column("Authors", style="dim", max_width=18)

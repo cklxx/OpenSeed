@@ -23,7 +23,7 @@ from openseed.agent.reader import (
 )
 from openseed.auth import has_anthropic_auth
 from openseed.cli._helpers import get_config, get_library, require_paper
-from openseed.models.paper import Tag
+from openseed.models.paper import Paper, Tag
 from openseed.services.arxiv import fetch_paper_metadata
 from openseed.storage.library import PaperLibrary
 
@@ -255,6 +255,36 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
     _pipeline_loop(selected_ids, config.default_model, lib)
 
 
+def _paper_year(p: Paper) -> int | None:
+    m = re.match(r"^(\d{2})\d{2}\.", p.arxiv_id or "")
+    return (2000 + int(m.group(1))) if m else None
+
+
+def _synthesis_chart(papers: list[Paper]) -> Panel:
+    """Render a year-timeline + tags comparison for a set of papers."""
+    year_pairs = sorted((((_paper_year(p) or 0), p) for p in papers), key=lambda x: x[0])
+    years = [y for y, _ in year_pairs if y]
+    min_y, max_y = (min(years), max(years)) if years else (2020, 2024)
+    span = max(max_y - min_y, 1)
+
+    table = Table(show_header=True, box=None, padding=(0, 1))
+    table.add_column("Year", style="cyan", width=6)
+    table.add_column("Timeline", width=26, no_wrap=True)
+    table.add_column("Title", style="bold", max_width=36)
+    table.add_column("Tags", style="yellow", max_width=28)
+
+    for year, p in year_pairs:
+        if year:
+            pos = round((year - min_y) / span * 23)
+            line = "─" * pos + "[bold cyan]◆[/bold cyan]" + "─" * (23 - pos)
+        else:
+            line = "─" * 24
+        tags = " ".join(t.name for t in p.tags[:4]) or "—"
+        table.add_row(str(year or "?"), line, p.title[:34], tags)
+
+    return Panel(table, title="Paper Timeline", border_style="blue")
+
+
 @agent.command()
 @click.argument("paper_ids", nargs=-1, required=True)
 @click.pass_context
@@ -262,14 +292,13 @@ def synthesize(ctx: click.Context, paper_ids: tuple[str, ...]) -> None:
     """Compare and synthesize findings across multiple papers."""
     _require_auth()
     lib = get_library(ctx)
-    texts = [
-        f"Title: {(p := require_paper(lib, pid)).title}\n\n{p.summary or p.abstract or p.title}"
-        for pid in paper_ids
-    ]
+    papers = [require_paper(lib, pid) for pid in paper_ids]
+    texts = [f"Title: {p.title}\n\n{p.summary or p.abstract or p.title}" for p in papers]
     config = get_config(ctx)
     with console.status("[cyan]Synthesizing…[/cyan]"):
         result = synthesize_papers(texts, config.default_model)
     console.print(Panel(Markdown(result), title="Synthesis", border_style="cyan"))
+    console.print(_synthesis_chart(papers))
     md_path = lib.save_synthesis(list(paper_ids), result)
     console.print(f"[dim]Saved → {md_path}[/dim]")
 

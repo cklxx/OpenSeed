@@ -48,9 +48,11 @@ class PaperLibrary:
         self._papers_cache = papers
 
     def add_paper(self, paper: Paper) -> bool:
-        """Add paper; skip if same arxiv_id already exists. Returns True if added."""
+        """Add paper; skip if same arxiv_id or url already exists. Returns True if added."""
         papers = self._load_papers()
         if paper.arxiv_id and any(p.arxiv_id == paper.arxiv_id for p in papers):
+            return False
+        if paper.url and any(p.url == paper.url for p in papers):
             return False
         papers.append(paper)
         self._save_papers(papers)
@@ -178,21 +180,27 @@ class PaperLibrary:
     # ── Summaries ─────────────────────────────────────────────
 
     def save_summary(self, paper: Paper) -> Path:
-        """Write paper.summary to ~/.openseed/summaries/{arxiv_id|id}.md and return the path."""
+        """Write paper.summary to ~/.openseed/summaries/{arxiv_id|id}.md; skip if unchanged."""
         summaries_dir = self._dir.parent / "summaries"
         summaries_dir.mkdir(parents=True, exist_ok=True)
         slug = (paper.arxiv_id or paper.id).replace("/", "_")
         path = summaries_dir / f"{slug}.md"
-        path.write_text(f"# {paper.title}\n\n{paper.summary}\n", encoding="utf-8")
+        content = f"# {paper.title}\n\n{paper.summary}\n"
+        if path.exists() and path.read_text(encoding="utf-8") == content:
+            return path
+        path.write_text(content, encoding="utf-8")
         return path
 
     def save_synthesis(self, paper_ids: list[str], content: str) -> Path:
-        """Write synthesis markdown to ~/.openseed/summaries/synthesis_{ids}.md."""
+        """Write synthesis markdown to summaries/synthesis_{ids}.md; skip if unchanged."""
         summaries_dir = self._dir.parent / "summaries"
         summaries_dir.mkdir(parents=True, exist_ok=True)
-        slug = "_".join(paper_ids[:4])
+        slug = "_".join(sorted(paper_ids)[:4])
         path = summaries_dir / f"synthesis_{slug}.md"
-        path.write_text(f"# Synthesis\n\n{content}\n", encoding="utf-8")
+        new_content = f"# Synthesis\n\n{content}\n"
+        if path.exists() and path.read_text(encoding="utf-8") == new_content:
+            return path
+        path.write_text(new_content, encoding="utf-8")
         return path
 
     # ── Helpers ───────────────────────────────────────────────
