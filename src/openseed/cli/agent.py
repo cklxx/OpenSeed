@@ -121,7 +121,7 @@ def _extract_arxiv_ids(text: str) -> list[str]:
 def _display_id_table(arxiv_ids: list[str]) -> None:
     from rich.table import Table
 
-    table = Table(title="找到的论文", show_lines=False)
+    table = Table(title="Papers found", show_lines=False)
     table.add_column("#", style="dim", width=4)
     table.add_column("ArXiv ID", style="cyan")
     for i, aid in enumerate(arxiv_ids, 1):
@@ -130,7 +130,7 @@ def _display_id_table(arxiv_ids: list[str]) -> None:
 
 
 def _parse_selection(raw: str, count: int) -> list[int]:
-    if raw.strip().lower() in ("all", "全部"):
+    if raw.strip().lower() == "all":
         return list(range(count))
     indices = []
     for part in raw.split(","):
@@ -162,7 +162,7 @@ def _analyze_and_save(paper, model: str, lib: PaperLibrary, cn: bool = False) ->
         paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model)]
     added = lib.add_paper(paper)
     if not added:
-        console.print(f"[yellow]跳过（已存在）[/yellow] {paper.title}")
+        console.print(f"[yellow]Skipped (already exists)[/yellow] {paper.title}")
         return
     tags_str = ", ".join(t.name for t in paper.tags)
     console.print(f"[green]✓[/green] [bold]{paper.title}[/bold]")
@@ -175,37 +175,37 @@ def _analyze_and_save(paper, model: str, lib: PaperLibrary, cn: bool = False) ->
 @click.option("--count", default=20, show_default=True, help="Number of papers to search for.")
 @click.pass_context
 def pipeline(ctx: click.Context, query: str, count: int) -> None:
-    """AI搜索 → 选择 → 自动分析入库（含引用数、中文摘要）。"""
+    """Search → select → auto-analyze and save (with citation counts)."""
     _require_auth()
     config = ctx.obj["config"]
     lib = _get_library(ctx)
 
-    with console.status(f"[cyan]AI 搜索 '{query}'（目标 {count} 篇）…[/cyan]"):
+    with console.status(f"[cyan]Searching '{query}' (target {count} papers)…[/cyan]"):
         md_result = search_papers_agent(query, model=config.default_model, count=count)
-    console.print(Panel(Markdown(md_result), title=f"搜索：{query}", border_style="cyan"))
+    console.print(Panel(Markdown(md_result), title=f"Search: {query}", border_style="cyan"))
 
     arxiv_ids = _extract_arxiv_ids(md_result)
     if not arxiv_ids:
-        console.print("[yellow]未找到 ArXiv ID，请尝试更具体的查询。[/yellow]")
+        console.print("[yellow]No ArXiv IDs found. Try a more specific query.[/yellow]")
         return
 
     _display_id_table(arxiv_ids)
-    raw = click.prompt("\n选择要分析的论文（如 1,3 或 1-10 或 all，q 退出）")
+    raw = click.prompt("\nSelect papers to analyze (e.g. 1,3 or 1-10 or all, q to quit)")
     if raw.strip().lower() == "q":
         return
 
     selected_ids = [arxiv_ids[i] for i in _parse_selection(raw, len(arxiv_ids))]
     if not selected_ids:
-        console.print("[yellow]无效选择。[/yellow]")
+        console.print("[yellow]Invalid selection.[/yellow]")
         return
 
-    console.print(f"\n[bold]正在抓取并分析 {len(selected_ids)} 篇论文…[/bold]\n")
+    console.print(f"\n[bold]Fetching and analyzing {len(selected_ids)} papers…[/bold]\n")
     for arxiv_id in selected_ids:
-        with console.status(f"[cyan]抓取 {arxiv_id}…[/cyan]"):
+        with console.status(f"[cyan]Fetching {arxiv_id}…[/cyan]"):
             try:
                 paper = asyncio.run(fetch_paper_metadata(arxiv_id))
             except Exception as exc:
-                console.print(f"[red]无法获取 {arxiv_id}: {exc}[/red]")
+                console.print(f"[red]Failed to fetch {arxiv_id}: {exc}[/red]")
                 continue
         _analyze_and_save(paper, config.default_model, lib)
 
