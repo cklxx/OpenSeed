@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -31,7 +31,7 @@ class Annotation(BaseModel):
     page: int | None = None
     text: str
     note: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tags: list[Tag] = Field(default_factory=list)
 
 
@@ -47,6 +47,6 @@ class Paper(BaseModel):
     pdf_path: str | None = None
     tags: list[Tag] = Field(default_factory=list)
     annotations: list[Annotation] = Field(default_factory=list)
-    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     summary: str | None = None
     status: Literal["unread", "reading", "read", "archived"] = "unread"

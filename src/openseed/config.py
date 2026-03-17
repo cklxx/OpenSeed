@@ -7,7 +7,6 @@ from pathlib import Path
 import toml
 from pydantic import BaseModel, Field
 
-
 _DEFAULT_DIR = Path.home() / ".openseed"
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ class ExperimentRun(BaseModel):
     """Single execution of an experiment."""
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     status: Literal["running", "completed", "failed"] = "running"
     metrics: dict[str, Any] = Field(default_factory=dict)
@@ -32,5 +32,5 @@ class Experiment(BaseModel):
     local_path: str | None = None
     description: str = ""
     runs: list[ExperimentRun] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tags: list[Tag] = Field(default_factory=list)
