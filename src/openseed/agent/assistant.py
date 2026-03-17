@@ -13,26 +13,36 @@ if TYPE_CHECKING:
 class ResearchAssistant:
     """General-purpose research assistant using Claude."""
 
-    def __init__(self, model: str = "claude-sonnet-4-20250514") -> None:
+    def __init__(self, model: str = "claude-opus-4-6") -> None:
         self._client = anthropic.Anthropic()
         self._model = model
 
     def _ask(self, system: str, prompt: str) -> str:
-        response = self._client.messages.create(
+        """Internal helper: stream a response and return the full text."""
+        with self._client.messages.stream(
             model=self._model,
-            max_tokens=2048,
+            max_tokens=4096,
+            thinking={"type": "adaptive"},
             system=system,
             messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
+        ) as stream:
+            return stream.get_final_message().content[-1].text
 
     def ask(self, question: str, context: str = "") -> str:
-        """Ask a research question."""
+        """Ask a research question, streaming the response."""
         system = "You are a knowledgeable research assistant."
         prompt = question
         if context:
             prompt = f"Context:\n{context}\n\nQuestion: {question}"
-        return self._ask(system, prompt)
+
+        with self._client.messages.stream(
+            model=self._model,
+            max_tokens=4096,
+            thinking={"type": "adaptive"},
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            return stream.get_final_message().content[-1].text
 
     def review_paper(self, paper: Paper) -> str:
         """Generate a review of a paper."""
