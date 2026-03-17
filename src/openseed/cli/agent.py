@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import click
@@ -171,7 +172,7 @@ def _parse_selection(raw: str, count: int) -> list[int]:
     return indices
 
 
-def _make_step(progress, task_id) -> callable:
+def _make_step(progress, task_id) -> Callable:
     def _step(msg: str) -> None:
         if progress and task_id is not None:
             progress.update(task_id, description=f"[cyan]{msg}[/cyan]")
@@ -179,16 +180,26 @@ def _make_step(progress, task_id) -> callable:
     return _step
 
 
+def _do_summarize(paper: Paper, model: str, step: Callable, cn: bool) -> None:
+    paper.summary = PaperReader(model=model).summarize_paper(
+        paper.abstract or paper.title, cn=cn, on_step=step
+    )
+
+
+def _do_tag(paper: Paper, model: str, step: Callable) -> None:
+    tags = auto_tag_paper(paper.abstract or paper.title, model, on_step=step)
+    paper.tags = [Tag(name=t) for t in tags]
+
+
 def _analyze_and_save(
-    paper, model: str, lib: PaperLibrary, progress=None, task_id=None, cn: bool = False
+    paper: Paper, model: str, lib: PaperLibrary, progress=None, task_id=None, cn: bool = False
 ) -> None:
     """Summarize + tag + save a paper."""
-    text = paper.abstract or paper.title
     step = _make_step(progress, task_id)
     step(f"Summarizing '{paper.title[:35]}…'")
-    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn, on_step=step)
+    _do_summarize(paper, model, step, cn)
     step(f"Tagging '{paper.title[:35]}…'")
-    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model, on_step=step)]
+    _do_tag(paper, model, step)
     if not lib.add_paper(paper):
         console.print(f"[yellow]Skipped (already exists)[/yellow] {paper.title}")
         return
@@ -196,10 +207,10 @@ def _analyze_and_save(
     tags_str = ", ".join(t.name for t in paper.tags)
     console.print(f"[green]✓[/green] [bold]{paper.title}[/bold]")
     console.print(f"   Tags: [yellow]{tags_str}[/yellow]  •  id: {paper.id}")
-    console.print(Panel(Markdown(paper.summary), border_style="green"))
+    console.print(Panel(Markdown(paper.summary or ""), border_style="green"))
     console.print(f"[dim]Saved → {md_path}[/dim]")
     step("Extracting visuals…")
-    render_paper_visuals(extract_paper_visuals(text, model), console)
+    render_paper_visuals(extract_paper_visuals(paper.abstract or paper.title, model), console)
 
 
 def _search_with_status(query: str, model: str, count: int) -> str:

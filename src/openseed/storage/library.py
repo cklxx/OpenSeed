@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openseed.models.experiment import Experiment
 from openseed.models.paper import Paper
+from openseed.models.research import ResearchSession
 from openseed.models.watch import ArxivWatch
 
 
@@ -23,6 +24,10 @@ class PaperLibrary:
         self._papers_cache: list[Paper] | None = None
         self._experiments_cache: list[Experiment] | None = None
         self._watches_cache: list[ArxivWatch] | None = None
+
+    @property
+    def _research_path(self) -> Path:
+        return self._dir / "research_sessions.json"
 
     def _invalidate_cache(self) -> None:
         self._papers_cache = None
@@ -176,6 +181,27 @@ class PaperLibrary:
             return False
         self._save_watches(filtered)
         return True
+
+    # ── Research Sessions ─────────────────────────────────────
+
+    def list_research_sessions(self) -> list[ResearchSession]:
+        if not self._research_path.exists():
+            return []
+        try:
+            return [ResearchSession(**d) for d in json.loads(self._research_path.read_text())]
+        except Exception:
+            return []
+
+    def add_research_session(self, session: ResearchSession) -> None:
+        sessions = self.list_research_sessions()
+        sessions.append(session)
+        self._atomic_write(
+            self._research_path,
+            json.dumps([s.model_dump(mode="json") for s in sessions], indent=2, default=str),
+        )
+
+    def get_research_session(self, session_id: str) -> ResearchSession | None:
+        return next((s for s in self.list_research_sessions() if s.id == session_id), None)
 
     # ── Summaries ─────────────────────────────────────────────
 

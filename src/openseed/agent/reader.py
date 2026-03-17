@@ -37,7 +37,11 @@ def _tool_label(block: ToolUseBlock) -> str:
 
 
 async def _ask_async(
-    model: str, system: str, prompt: str, on_step: Callable[[str], None] | None = None
+    model: str,
+    system: str,
+    prompt: str,
+    on_step: Callable[[str], None] | None = None,
+    on_result: Callable[[object], None] | None = None,
 ) -> str:
     result = ""
     async for msg in query(prompt=prompt, options=_make_opts(model, system)):
@@ -47,10 +51,18 @@ async def _ask_async(
                     on_step(_tool_label(block))
         if isinstance(msg, ResultMessage):
             result = msg.result or ""
+            if on_result:
+                on_result(msg)
     return result
 
 
-def _ask(model: str, system: str, prompt: str, on_step: Callable[[str], None] | None = None) -> str:
+def _ask(
+    model: str,
+    system: str,
+    prompt: str,
+    on_step: Callable[[str], None] | None = None,
+    on_result: Callable[[object], None] | None = None,
+) -> str:
     # Suppress the noisy anyio cancel-scope cleanup RuntimeError emitted by
     # claude-agent-sdk when the async generator exits early (cosmetic only).
     def _silence_cancel_scope(loop: asyncio.AbstractEventLoop, ctx: dict) -> None:
@@ -62,7 +74,7 @@ def _ask(model: str, system: str, prompt: str, on_step: Callable[[str], None] | 
     loop = asyncio.new_event_loop()
     loop.set_exception_handler(_silence_cancel_scope)
     try:
-        return loop.run_until_complete(_ask_async(model, system, prompt, on_step))
+        return loop.run_until_complete(_ask_async(model, system, prompt, on_step, on_result))
     finally:
         loop.close()
 

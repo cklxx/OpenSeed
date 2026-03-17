@@ -15,6 +15,7 @@ from openseed.auth import (
 from openseed.cli.agent import agent
 from openseed.cli.experiment import experiment
 from openseed.cli.paper import paper
+from openseed.cli.research import research
 from openseed.config import ensure_dirs, load_config, save_config
 from openseed.doctor import render_results, run_checks
 
@@ -140,3 +141,4 @@ def doctor() -> None:
 cli.add_command(paper)
 cli.add_command(experiment)
 cli.add_command(agent)
+cli.add_command(research)
