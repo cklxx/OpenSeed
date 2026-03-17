@@ -211,8 +211,12 @@ def _fmt_citations(n: int) -> str:
 def search(ctx: click.Context, query: str, count: int, add: bool) -> None:
     """Search for papers using AI, sorted by citation count."""
     config = ctx.obj["config"]
-    with console.status(f"[cyan]Searching '{query}'…[/cyan]") as status:
-        papers = discover_papers(query, model=config.default_model, count=count)
+    with console.status("[cyan]Searching…[/cyan]") as status:
+
+        def _on_step(label: str) -> None:
+            status.update(f"[cyan]{label}[/cyan]")
+
+        papers = discover_papers(query, model=config.default_model, count=count, on_step=_on_step)
         status.update(f"[cyan]Found {len(papers)} papers — verifying citations…[/cyan]")
         results = enrich_citations(papers)
 

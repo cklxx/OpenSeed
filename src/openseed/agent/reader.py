@@ -142,7 +142,9 @@ def _parse_ranked_lines(raw: str) -> list[dict]:
     return papers
 
 
-def discover_papers(search_query: str, model: str, count: int = 10) -> list[dict]:
+def discover_papers(
+    search_query: str, model: str, count: int = 10, on_step: Callable[[str], None] | None = None
+) -> list[dict]:
     """Phase 1: Claude web search → parsed paper list with estimated citations."""
     system = (
         "You are a research paper discovery assistant with web search access. "
@@ -156,7 +158,7 @@ def discover_papers(search_query: str, model: str, count: int = 10) -> list[dict
         "|Vaswani et al.|Transformer architecture\n"
         "Only include papers with valid ArXiv IDs. Sort descending by citation count."
     )
-    raw = _ask(model, system, f"Find {count} papers about: {search_query}")
+    raw = _ask(model, system, f"Find {count} papers about: {search_query}", on_step=on_step)
     return _parse_ranked_lines(raw)
 
 
