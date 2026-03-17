@@ -27,6 +27,7 @@ from openseed.auth import has_anthropic_auth
 from openseed.cli._helpers import (
     get_config,
     get_library,
+    library_status_for_arxiv,
     render_paper_visuals,
     require_paper,
 )
@@ -123,17 +124,23 @@ def _parse_md_table(text: str) -> dict[str, dict]:
     return info
 
 
-def _display_id_table(arxiv_ids: list[str], info: dict[str, dict]) -> None:
+def _display_id_table(arxiv_ids: list[str], info: dict[str, dict], lib: PaperLibrary) -> None:
     table = Table(title="Papers found", show_lines=True)
     table.add_column("#", style="dim", width=4)
     table.add_column("ArXiv ID", style="cyan", width=13)
-    table.add_column("Title", style="bold", max_width=48)
-    table.add_column("Authors", style="dim", max_width=22)
+    table.add_column("Title", style="bold", max_width=46)
+    table.add_column("Authors", style="dim", max_width=20)
     table.add_column("Year", justify="right", width=6)
+    table.add_column("Library", width=12)
     for i, aid in enumerate(arxiv_ids, 1):
         meta = info.get(aid, {})
         table.add_row(
-            str(i), aid, meta.get("title", ""), meta.get("authors", ""), meta.get("year", "")
+            str(i),
+            aid,
+            meta.get("title", ""),
+            meta.get("authors", ""),
+            meta.get("year", ""),
+            library_status_for_arxiv(lib, aid),
         )
     console.print(table)
 
@@ -237,6 +244,14 @@ def _pipeline_loop(
                 console.print(f"[red]Failed to fetch {arxiv_id}: {paper}[/red]")
                 progress.advance(overall)
                 continue
+            existing = lib.get_paper_by_arxiv(arxiv_id)
+            if existing and existing.summary:
+                console.print(
+                    f"[dim]Skipping {arxiv_id} — already analyzed:[/dim] "
+                    f"[bold]{existing.title}[/bold]"
+                )
+                progress.advance(overall)
+                continue
             _analyze_and_save(paper, model, lib, progress=progress, task_id=paper_task, cn=cn)
             progress.advance(paper_task)
             progress.advance(overall)
@@ -258,7 +273,7 @@ def pipeline(ctx: click.Context, query: str, count: int, cn: bool) -> None:
     if not arxiv_ids:
         console.print("[yellow]No ArXiv IDs found. Try a more specific query.[/yellow]")
         return
-    _display_id_table(arxiv_ids, _parse_md_table(md_result))
+    _display_id_table(arxiv_ids, _parse_md_table(md_result), lib)
     raw = click.prompt("\nSelect papers to analyze (e.g. 1,3 or 1-10 or all, q to quit)")
     if raw.strip().lower() == "q":
         return

@@ -44,6 +44,17 @@ def _build_metrics_table(metrics: list[dict]) -> Table:
     return table
 
 
+def library_status_for_arxiv(lib: PaperLibrary, arxiv_id: str) -> str:
+    """Return a Rich-formatted status badge if the paper is in the local library."""
+    lib._load_papers()
+    paper = (lib._papers_by_arxiv or {}).get(arxiv_id)
+    if not paper:
+        return ""
+    if paper.summary:
+        return "[green]✓ analyzed[/green]"
+    return "[dim]in lib[/dim]"
+
+
 def render_paper_visuals(data: dict, out: Console) -> None:
     """Render method pipeline panel and metrics comparison table."""
     if pipeline := data.get("pipeline"):

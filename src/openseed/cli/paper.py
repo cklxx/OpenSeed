@@ -19,7 +19,13 @@ from openseed.agent.reader import (
     enrich_citations,
     extract_paper_visuals,
 )
-from openseed.cli._helpers import get_config, get_library, render_paper_visuals, require_paper
+from openseed.cli._helpers import (
+    get_config,
+    get_library,
+    library_status_for_arxiv,
+    render_paper_visuals,
+    require_paper,
+)
 from openseed.models.paper import Paper, Tag, paper_to_bibtex
 from openseed.models.watch import ArxivWatch
 from openseed.services.arxiv import (
@@ -66,7 +72,7 @@ def _score_bar(score: float, max_score: float, width: int = 10) -> str:
     return f"[yellow]{score:5.1f}[/yellow]"
 
 
-def _build_search_table(results: list[dict], since: int | None) -> Table:
+def _build_search_table(results: list[dict], since: int | None, lib=None) -> Table:
     title = "Search results" + (f" (since {since})" if since else "")
     max_score = max((r.get("score", 0) for r in results), default=1) or 1
     table = Table(title=title, show_lines=True)
@@ -78,8 +84,10 @@ def _build_search_table(results: list[dict], since: int | None) -> Table:
     table.add_column("Cite", justify="right", width=7)
     table.add_column("Authors", style="dim", max_width=18)
     table.add_column("ArXiv ID", style="cyan", width=13)
+    if lib is not None:
+        table.add_column("Library", width=12)
     for i, r in enumerate(results, 1):
-        table.add_row(
+        row = [
             str(i),
             r["title"],
             r["relevance"],
@@ -88,7 +96,10 @@ def _build_search_table(results: list[dict], since: int | None) -> Table:
             _fmt_citations(r["citations"]),
             r["authors"],
             r["arxiv_id"],
-        )
+        ]
+        if lib is not None:
+            row.append(library_status_for_arxiv(lib, r["arxiv_id"]))
+        table.add_row(*row)
     return table
 
 
@@ -294,21 +305,20 @@ def search(
 ) -> None:
     """Search for papers using AI, ranked by freshness-weighted score."""
     config = get_config(ctx)
+    lib = get_library(ctx)
     results = _run_discover(query, config, count, since)
     if since:
         results = [r for r in results if r.get("year", 0) >= since]
     if not results:
         console.print("[dim]No results found.[/dim]")
         return
-    console.print(_build_search_table(results, since))
+    console.print(_build_search_table(results, since, lib=lib))
     if download:
-        lib = get_library(ctx)
         console.print(f"\n[bold]Downloading top {min(10, len(results))} papers…[/bold]\n")
         for r in results[:10]:
             _fetch_and_add(ctx, r, lib, config, cn)
         return
     if add:
-        lib = get_library(ctx)
         top = results[0]
         try:
             p = asyncio.run(fetch_paper_metadata(top["arxiv_id"]))

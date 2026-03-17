@@ -75,6 +75,10 @@ class PaperLibrary:
         self._load_papers()
         return (self._papers_by_id or {}).get(paper_id)
 
+    def get_paper_by_arxiv(self, arxiv_id: str) -> Paper | None:
+        self._load_papers()
+        return (self._papers_by_arxiv or {}).get(arxiv_id)
+
     def list_papers(self) -> list[Paper]:
         return self._load_papers()
 
