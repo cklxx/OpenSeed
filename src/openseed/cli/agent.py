@@ -153,13 +153,22 @@ def _parse_selection(raw: str, count: int) -> list[int]:
     return indices
 
 
-def _analyze_and_save(paper, model: str, lib: PaperLibrary, cn: bool = False) -> None:
+def _analyze_and_save(
+    paper, model: str, lib: PaperLibrary, progress=None, task_id=None, cn: bool = False
+) -> None:
     """Run summary + auto-tag pipeline on a paper and save it."""
     text = paper.abstract or paper.title
-    with console.status(f"[cyan]Summarizing '{paper.title[:40]}…'[/cyan]"):
-        paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn)
-    with console.status("[cyan]Generating tags…[/cyan]"):
-        paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model)]
+
+    def _step(msg: str) -> None:
+        if progress and task_id is not None:
+            progress.update(task_id, description=f"[cyan]{msg}[/cyan]")
+
+    _step(f"Summarizing '{paper.title[:35]}…'")
+    paper.summary = PaperReader(model=model).summarize_paper(text, cn=cn)
+
+    _step(f"Tagging '{paper.title[:35]}…'")
+    paper.tags = [Tag(name=t) for t in auto_tag_paper(text, model)]
+
     added = lib.add_paper(paper)
     if not added:
         console.print(f"[yellow]Skipped (already exists)[/yellow] {paper.title}")
@@ -199,15 +208,37 @@ def pipeline(ctx: click.Context, query: str, count: int) -> None:
         console.print("[yellow]Invalid selection.[/yellow]")
         return
 
-    console.print(f"\n[bold]Fetching and analyzing {len(selected_ids)} papers…[/bold]\n")
-    for arxiv_id in selected_ids:
-        with console.status(f"[cyan]Fetching {arxiv_id}…[/cyan]"):
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+
+    console.print()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("[dim]{task.completed}/{task.total}[/dim]"),
+        console=console,
+        transient=False,
+    ) as progress:
+        overall = progress.add_task("[bold]Pipeline[/bold]", total=len(selected_ids))
+        paper_task = progress.add_task("", total=2)
+
+        for arxiv_id in selected_ids:
+            progress.update(
+                paper_task, description=f"[cyan]Fetching {arxiv_id}…[/cyan]", completed=0
+            )
             try:
                 paper = asyncio.run(fetch_paper_metadata(arxiv_id))
             except Exception as exc:
                 console.print(f"[red]Failed to fetch {arxiv_id}: {exc}[/red]")
+                progress.advance(overall)
                 continue
-        _analyze_and_save(paper, config.default_model, lib)
+            progress.advance(paper_task)
+            _analyze_and_save(
+                paper, config.default_model, lib, progress=progress, task_id=paper_task
+            )
+            progress.advance(paper_task)
+            progress.advance(overall)
 
 
 @agent.command()
