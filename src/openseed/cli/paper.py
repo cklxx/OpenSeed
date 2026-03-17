@@ -206,10 +206,11 @@ def _fmt_citations(n: int) -> str:
 @paper.command("search")
 @click.argument("query")
 @click.option("--count", default=10, show_default=True, help="Number of results to find.")
+@click.option("--since", default=None, type=int, metavar="YEAR", help="Filter by publication year.")
 @click.option("--add", is_flag=True, help="Auto-add the top result to the library.")
 @click.pass_context
-def search(ctx: click.Context, query: str, count: int, add: bool) -> None:
-    """Search for papers using AI, sorted by citation count."""
+def search(ctx: click.Context, query: str, count: int, since: int | None, add: bool) -> None:
+    """Search for papers using AI, ranked by freshness-weighted score."""
     config = ctx.obj["config"]
     with console.status("[cyan]Searching…[/cyan]") as status:
 
@@ -220,30 +221,34 @@ def search(ctx: click.Context, query: str, count: int, add: bool) -> None:
         status.update(f"[cyan]Found {len(papers)} papers — verifying citations…[/cyan]")
         results = enrich_citations(papers)
 
+    if since:
+        results = [r for r in results if r.get("year", 0) >= since]
+
     if not results:
         console.print("[dim]No results found.[/dim]")
         return
 
-    table = Table(title=f"Search: {query} (by freshness-weighted score)", show_lines=True)
+    title = f"Search: {query}" + (f" (since {since})" if since else "")
+    table = Table(title=title, show_lines=True)
     table.add_column("#", style="dim", width=4)
-    table.add_column("ArXiv ID", style="cyan", width=13)
-    table.add_column("Title", style="bold", max_width=38)
-    table.add_column("Authors", max_width=20)
+    table.add_column("Title", style="bold", max_width=42)
+    table.add_column("Relevance", max_width=30)
+    table.add_column("Score", justify="right", width=7)
     table.add_column("Year", justify="right", width=6)
     table.add_column("Cite", justify="right", width=7)
-    table.add_column("Score", justify="right", width=7)
-    table.add_column("Relevance", max_width=28)
+    table.add_column("Authors", style="dim", max_width=20)
+    table.add_column("ArXiv ID", style="cyan", width=13)
 
     for i, r in enumerate(results, 1):
         table.add_row(
             str(i),
-            r["arxiv_id"],
             r["title"],
-            r["authors"],
+            r["relevance"],
+            f"{r.get('score', 0):.1f}",
             str(r.get("year", "")),
             _fmt_citations(r["citations"]),
-            f"{r.get('score', 0):.1f}",
-            r["relevance"],
+            r["authors"],
+            r["arxiv_id"],
         )
 
     console.print(table)
