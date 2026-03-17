@@ -19,7 +19,12 @@ Papers are ranked by real citation counts fetched from Semantic Scholar — not 
 ## Install
 
 ```bash
-pip install -e ".[dev]"
+# pip
+pip install openseed
+
+# uv
+uv tool install openseed
+
 openseed doctor    # check environment
 openseed setup     # configure auth
 ```
