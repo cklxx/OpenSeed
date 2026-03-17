@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from openseed.agent.reader import discover_papers, enrich_citations
+from openseed.agent.reader import PaperReader, discover_papers, enrich_citations
 from openseed.models.paper import Paper, Tag, paper_to_bibtex
 from openseed.models.watch import ArxivWatch
 from openseed.services.arxiv import (
@@ -199,10 +199,19 @@ def tag(ctx: click.Context, paper_id: str, name: str, color: str) -> None:
     console.print(f"[green]✓[/green] Tagged [bold]{p.title}[/bold] with '{name}'")
 
 
-def _search_download(ctx: click.Context, results: list[dict]) -> None:
+def _summarize_cn(p, config) -> None:
+    with console.status(f"[cyan]Summarizing '{p.title[:40]}…'[/cyan]"):
+        p.summary = PaperReader(model=config.default_model).summarize_paper(
+            p.abstract or p.title, cn=True
+        )
+    console.print(Panel(p.summary, title=p.title[:60], border_style="green"))
+
+
+def _search_download(ctx: click.Context, results: list[dict], cn: bool = False) -> None:
     selected = results[:10]
     console.print(f"\n[bold]Downloading top {len(selected)} papers…[/bold]\n")
     lib = _get_library(ctx)
+    config = ctx.obj["config"]
     for r in selected:
         try:
             p = asyncio.run(fetch_paper_metadata(r["arxiv_id"]))
@@ -210,6 +219,8 @@ def _search_download(ctx: click.Context, results: list[dict]) -> None:
             console.print(f"[red]Failed to fetch {r['arxiv_id']}: {exc}[/red]")
             continue
         _download_and_extract(ctx, p, r["arxiv_id"])
+        if cn:
+            _summarize_cn(p, config)
         added = lib.add_paper(p)
         status = "[green]✓ Added[/green]" if added else "[yellow]Already exists[/yellow]"
         console.print(f"{status} [bold]{p.title}[/bold] (id: {p.id})")
@@ -226,10 +237,17 @@ def _fmt_citations(n: int) -> str:
 @click.option("--count", default=10, show_default=True, help="Number of results to find.")
 @click.option("--since", default=None, type=int, metavar="YEAR", help="Filter by publication year.")
 @click.option("--add", is_flag=True, help="Auto-add the top result to the library.")
-@click.option("--download", is_flag=True, help="Select papers to add and download PDFs.")
+@click.option("--download", is_flag=True, help="Download top 10 papers and add to library.")
+@click.option("--cn", is_flag=True, help="Generate Chinese summary after download.")
 @click.pass_context
 def search(
-    ctx: click.Context, query: str, count: int, since: int | None, add: bool, download: bool
+    ctx: click.Context,
+    query: str,
+    count: int,
+    since: int | None,
+    add: bool,
+    download: bool,
+    cn: bool,
 ) -> None:
     """Search for papers using AI, ranked by freshness-weighted score."""
     config = ctx.obj["config"]
@@ -277,7 +295,7 @@ def search(
     console.print(table)
 
     if download:
-        _search_download(ctx, results)
+        _search_download(ctx, results, cn=cn)
         return
 
     if add and results:
