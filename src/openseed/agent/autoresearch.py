@@ -9,12 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
+from openseed.agent.discovery import discover_papers, enrich_citations
 from openseed.agent.reader import (
     PaperReader,
     _ask,
     auto_tag_paper,
-    discover_papers,
-    enrich_citations,
     synthesize_papers,
 )
 from openseed.models.paper import Paper, Tag

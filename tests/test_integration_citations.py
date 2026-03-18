@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from openseed.agent.reader import _fetch_citations, enrich_citations
+from openseed.agent.discovery import _fetch_citations, enrich_citations
 
 pytestmark = pytest.mark.integration
 

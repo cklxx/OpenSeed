@@ -15,12 +15,12 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 
 from openseed.agent.assistant import ResearchAssistant
+from openseed.agent.discovery import search_papers_agent
 from openseed.agent.reader import (
     PaperReader,
     auto_tag_paper,
     extract_paper_visuals,
     generate_experiment_code,
-    search_papers_agent,
     synthesize_papers,
 )
 from openseed.auth import has_anthropic_auth

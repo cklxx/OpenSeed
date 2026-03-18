@@ -12,10 +12,9 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
+from openseed.agent.discovery import discover_papers, enrich_citations
 from openseed.agent.reader import (
     PaperReader,
-    discover_papers,
-    enrich_citations,
     extract_paper_visuals,
 )
 from openseed.cli._helpers import (
