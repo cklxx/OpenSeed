@@ -38,6 +38,26 @@ from openseed.storage.library import PaperLibrary
 console = Console()
 
 
+def _show_similar_papers(paper: Paper, lib: PaperLibrary) -> None:
+    """Show recommended similar papers via Semantic Scholar."""
+    if not paper.arxiv_id:
+        return
+    from openseed.services.scholar import get_recommendations
+
+    recs = get_recommendations(paper.arxiv_id, limit=5)
+    recs = [r for r in recs if not lib.get_paper_by_arxiv(r["arxiv_id"])]
+    if not recs:
+        return
+    table = Table(title="Similar papers (not in library)", show_lines=True)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Title", style="bold", max_width=50)
+    table.add_column("ArXiv ID", style="cyan", width=13)
+    table.add_column("Year", width=6)
+    for i, r in enumerate(recs[:5], 1):
+        table.add_row(str(i), r["title"][:48], r["arxiv_id"], str(r.get("year", "")))
+    console.print(table)
+
+
 def _require_auth() -> None:
     ok, _ = has_anthropic_auth()
     if not ok:
@@ -85,6 +105,7 @@ def summarize(ctx: click.Context, paper_id: str, cn: bool) -> None:
     with console.status("[cyan]Extracting visuals…[/cyan]"):
         visuals = extract_paper_visuals(p.abstract or p.title, config.default_model)
     render_paper_visuals(visuals, console)
+    _show_similar_papers(p, lib)
 
 
 @agent.command()

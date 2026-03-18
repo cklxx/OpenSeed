@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -32,7 +31,6 @@ from openseed.services.arxiv import (
     download_pdf,
     fetch_paper_metadata,
     parse_arxiv_id,
-    search_papers,
 )
 from openseed.services.pdf import extract_text
 from openseed.storage.library import PaperLibrary
@@ -146,13 +144,10 @@ def _fetch_and_add(ctx: click.Context, r: dict, lib, config, cn: bool) -> None:
 
 
 def _run_watch(lib, w: ArxivWatch) -> None:
+    from openseed.services.watch import run_single_watch
+
     console.print(f"\n[bold cyan]Watch:[/bold cyan] '{w.query}'")
-    papers = search_papers(w.query, max_results=20)
-    results = [
-        p for p in papers if w.since_year is None or (_arxiv_year(p.arxiv_id) or 0) >= w.since_year
-    ]
-    w.last_run = datetime.now(UTC)
-    lib.update_watch(w)
+    results = run_single_watch(lib, w)
     if not results:
         console.print("  [dim]No results.[/dim]")
         return
@@ -344,16 +339,30 @@ def status(ctx: click.Context, paper_id: str, new_status: str) -> None:
     console.print(f"[green]✓[/green] Status updated to '{new_status}'")
 
 
+def _smart_queue_score(paper: Paper, recent_tags: set[str]) -> float:
+    """Score an unread paper by relevance to recent reading activity + recency."""
+    tag_overlap = sum(1 for t in paper.tags if t.name in recent_tags)
+    recency = paper.added_at.timestamp()
+    return tag_overlap * 1000 + recency
+
+
 @paper.command("next")
 @click.pass_context
 def next_paper(ctx: click.Context) -> None:
-    """Show the oldest unread paper and mark it as reading."""
+    """Show the most relevant unread paper and mark it as reading."""
     lib = get_library(ctx)
-    unread = [p for p in lib.list_papers() if p.status == "unread"]
+    all_papers = lib.list_papers()
+    unread = [p for p in all_papers if p.status == "unread"]
     if not unread:
         console.print("[dim]No unread papers.[/dim]")
         return
-    p = min(unread, key=lambda x: x.added_at)
+    recent_read = sorted(
+        [p for p in all_papers if p.status in ("read", "reading")],
+        key=lambda x: x.added_at,
+        reverse=True,
+    )[:10]
+    recent_tags = {t.name for p in recent_read for t in p.tags}
+    p = max(unread, key=lambda x: _smart_queue_score(x, recent_tags))
     p.status = "reading"
     lib.update_paper(p)
     authors = ", ".join(a.name for a in p.authors) if p.authors else "Unknown"
@@ -452,16 +461,88 @@ def watch_remove(ctx: click.Context, watch_id: str) -> None:
 
 
 @watch_group.command("run")
+@click.option("--digest/--no-digest", default=True, help="Generate a markdown digest.")
 @click.pass_context
-def watch_run(ctx: click.Context) -> None:
+def watch_run(ctx: click.Context, digest: bool) -> None:
     """Run all watches and show new papers."""
+    from openseed.services.digest import generate_digest, save_digest
+    from openseed.services.watch import run_all_watches
+
     lib = get_library(ctx)
     watches = lib.list_watches()
     if not watches:
         console.print("[dim]No watches configured.[/dim]")
         return
-    for w in watches:
-        _run_watch(lib, w)
+    results = run_all_watches(lib)
+    watch_names = {w.id: w.query for w in watches}
+    for wid, papers in results.items():
+        query = watch_names.get(wid, wid)
+        console.print(f"\n[bold cyan]Watch:[/bold cyan] '{query}'")
+        if not papers:
+            console.print("  [dim]No results.[/dim]")
+            continue
+        for p in papers:
+            year = _arxiv_year(p.arxiv_id) or ""
+            console.print(f"  [{year}] [bold]{p.title}[/bold]  [dim]{p.arxiv_id}[/dim]")
+    if digest:
+        config = get_config(ctx)
+        content = generate_digest(results, watch_names)
+        digest_dir = Path(config.config_dir) / "digests"
+        path = save_digest(content, digest_dir)
+        console.print(f"\n[dim]Digest saved → {path}[/dim]")
+
+
+@watch_group.command("schedule")
+def watch_schedule() -> None:
+    """Install a daily cron job to run watches automatically."""
+    from openseed.services.cron import install
+
+    try:
+        result = install()
+        if result == "already scheduled":
+            console.print("[yellow]Watch cron is already scheduled.[/yellow]")
+        else:
+            console.print("[green]✓[/green] Scheduled daily watch run")
+            console.print(f"[dim]Cron entry: {result}[/dim]")
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+
+
+@watch_group.command("unschedule")
+def watch_unschedule() -> None:
+    """Remove the daily cron job for watches."""
+    from openseed.services.cron import uninstall
+
+    try:
+        if uninstall():
+            console.print("[green]✓[/green] Watch cron removed")
+        else:
+            console.print("[dim]No watch cron was scheduled.[/dim]")
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+
+
+@watch_group.command("status")
+def watch_status() -> None:
+    """Show the status of scheduled watch runs."""
+    from openseed.services.cron import get_status
+
+    try:
+        status = get_status()
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    scheduled = "[green]active[/green]" if status["scheduled"] else "[dim]not scheduled[/dim]"
+    console.print(f"[bold]Cron:[/bold] {scheduled}")
+    console.print(f"[bold]Log:[/bold] {status['log_path']}")
+    if status["last_lines"]:
+        console.print("\n[bold]Recent log:[/bold]")
+        for line in status["last_lines"][-10:]:
+            console.print(f"  [dim]{line}[/dim]")
+    else:
+        console.print("[dim]No log output yet.[/dim]")
 
 
 @paper.command("graph")

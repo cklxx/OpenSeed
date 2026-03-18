@@ -55,6 +55,9 @@ OpenSeed is an AI-powered research workflow CLI. It manages a local paper librar
 | `services/arxiv.py` | ArXiv metadata fetch + search (sync + async) |
 | `services/pdf.py` | PDF text extraction via PyMuPDF |
 | `services/scholar.py` | Semantic Scholar API client (citations, references, recommendations) |
+| `services/watch.py` | Watch execution service (run watches, return results) |
+| `services/cron.py` | Crontab management (install/remove/status) |
+| `services/digest.py` | Digest generation (markdown summary of watch results) |
 | `storage/migrate.py` | JSON → SQLite auto-migration |
 | `agent/reader.py` | PaperReader — structured summarize/analyze via Claude |
 | `agent/assistant.py` | ResearchAssistant — freeform ask/review via Claude |
