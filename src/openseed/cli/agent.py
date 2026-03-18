@@ -391,3 +391,67 @@ def codegen(ctx: click.Context, paper_id: str, out_path: str | None) -> None:
     with console.status("[cyan]Generating experiment code…[/cyan]"):
         code = generate_experiment_code(text, config.default_model)
     _save_codegen(lib, p, dest, code)
+
+
+def _paper_text(p: Paper) -> str:
+    return f"Title: {p.title}\n\n{p.abstract or ''}\n\n{p.summary or p.title}"
+
+
+@agent.command()
+@click.argument("paper_id_a")
+@click.argument("paper_id_b")
+@click.pass_context
+def compare(ctx: click.Context, paper_id_a: str, paper_id_b: str) -> None:
+    """Compare two papers side-by-side."""
+    _require_auth()
+    if paper_id_a == paper_id_b:
+        console.print("[red]Cannot compare a paper to itself.[/red]")
+        raise SystemExit(1)
+    lib = get_library(ctx)
+    pa = require_paper(lib, paper_id_a)
+    pb = require_paper(lib, paper_id_b)
+    if not (pa.abstract or pa.summary):
+        console.print(f"[red]Paper {pa.id} has no text.[/red] Run: agent summarize {pa.id}")
+        raise SystemExit(1)
+    if not (pb.abstract or pb.summary):
+        console.print(f"[red]Paper {pb.id} has no text.[/red] Run: agent summarize {pb.id}")
+        raise SystemExit(1)
+    config = get_config(ctx)
+    from openseed.agent.compare import compare_papers
+
+    with console.status("[cyan]Comparing papers…[/cyan]"):
+        result = compare_papers(
+            _paper_text(pa), _paper_text(pb), pa.title, pb.title, config.default_model
+        )
+    console.print(
+        Panel(Markdown(result), title=f"{pa.title[:30]} vs {pb.title[:30]}", border_style="yellow")
+    )
+
+
+@agent.command("export-latex")
+@click.argument("paper_ids", nargs=-1, required=True)
+@click.option("--output", "out_dir", default=None, help="Output directory for .tex and .bib files.")
+@click.pass_context
+def export_latex(ctx: click.Context, paper_ids: tuple[str, ...], out_dir: str | None) -> None:
+    """Export synthesis as LaTeX related-work section with BibTeX."""
+    lib = get_library(ctx)
+    papers = [require_paper(lib, pid) for pid in paper_ids]
+    slug = "_".join(sorted(paper_ids)[:4])
+    summaries_dir = Path(get_config(ctx).config_dir) / "summaries"
+    synth_path = summaries_dir / f"synthesis_{slug}.md"
+    if not synth_path.exists():
+        console.print("[red]No synthesis found for these papers.[/red]")
+        console.print(f"[dim]Run: openseed agent synthesize {' '.join(paper_ids)}[/dim]")
+        raise SystemExit(1)
+    synthesis = synth_path.read_text(encoding="utf-8")
+    from openseed.agent.latex import export_related_work
+
+    latex, bibtex = export_related_work(synthesis, papers)
+    dest = Path(out_dir) if out_dir else Path(".")
+    dest.mkdir(parents=True, exist_ok=True)
+    tex_path = dest / "related_work.tex"
+    bib_path = dest / "references.bib"
+    tex_path.write_text(latex, encoding="utf-8")
+    bib_path.write_text(bibtex, encoding="utf-8")
+    console.print(f"[green]✓[/green] LaTeX → [bold]{tex_path}[/bold]")
+    console.print(f"[green]✓[/green] BibTeX → [bold]{bib_path}[/bold]")
