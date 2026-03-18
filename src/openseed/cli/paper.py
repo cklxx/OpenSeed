@@ -437,13 +437,27 @@ def watch_list(ctx: click.Context) -> None:
         return
     table = Table(title="Watches", show_lines=True)
     table.add_column("ID", style="cyan", width=12)
+    table.add_column("Source", width=6)
     table.add_column("Query", style="bold")
     table.add_column("Since", width=6)
     table.add_column("Last run", width=20)
     for w in watches:
         last = w.last_run.strftime("%Y-%m-%d %H:%M") if w.last_run else "never"
-        table.add_row(w.id, w.query, str(w.since_year or ""), last)
+        table.add_row(w.id, w.source, w.query, str(w.since_year or ""), last)
     console.print(table)
+
+
+@watch_group.command("add-rss")
+@click.argument("url")
+@click.option("--name", default=None, help="Display name for this feed.")
+@click.pass_context
+def watch_add_rss(ctx: click.Context, url: str, name: str | None) -> None:
+    """Add an RSS/Atom feed as a watch source."""
+    lib = get_library(ctx)
+    label = name or url[:50]
+    w = ArxivWatch(query=label, source="rss", feed_url=url)
+    lib.add_watch(w)
+    console.print(f"[green]✓[/green] RSS watch '{label}' added (id: {w.id})")
 
 
 @watch_group.command("remove")

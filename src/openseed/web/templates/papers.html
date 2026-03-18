@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Papers{% endblock %}
+{% block content %}
+<h1>Papers</h1>
+<form class="search-box" action="/papers" method="get">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search papers...">
+    <button type="submit">Search</button>
+</form>
+<div class="filters">
+    <a href="/papers" {% if not status %}class="active"{% endif %}>All</a>
+    <a href="/papers?status=unread" {% if status == 'unread' %}class="active"{% endif %}>Unread</a>
+    <a href="/papers?status=reading" {% if status == 'reading' %}class="active"{% endif %}>Reading</a>
+    <a href="/papers?status=read" {% if status == 'read' %}class="active"{% endif %}>Read</a>
+    <a href="/papers?status=archived" {% if status == 'archived' %}class="active"{% endif %}>Archived</a>
+</div>
+{% if papers %}
+<table>
+    <thead>
+        <tr><th>Title</th><th>ArXiv</th><th>Status</th><th>Tags</th><th>Added</th></tr>
+    </thead>
+    <tbody>
+    {% for p in papers %}
+        <tr>
+            <td><a href="/papers/{{ p.id }}">{{ p.title }}</a></td>
+            <td style="font-size: 13px; color: var(--dim);">{{ p.arxiv_id or '' }}</td>
+            <td><span class="badge badge-{{ p.status }}">{{ p.status }}</span></td>
+            <td>{% for t in p.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}</td>
+            <td style="font-size: 13px; color: var(--dim);">{{ p.added_at.strftime('%Y-%m-%d') }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color: var(--dim);">No papers found.</p>
+{% endif %}
+{% endblock %}

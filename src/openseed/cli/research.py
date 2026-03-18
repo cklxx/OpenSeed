@@ -124,3 +124,45 @@ def _print_usage() -> None:
     usage = get_usage_summary()
     if usage:
         console.print(f"[dim]openMax usage: {usage}[/dim]")
+
+
+@research.command("export")
+@click.argument("session_id")
+@click.option("--output", "out_path", default=None, help="Output .json path.")
+@click.pass_context
+def export_session_cmd(ctx: click.Context, session_id: str, out_path: str | None) -> None:
+    """Export a research session as a shareable JSON bundle."""
+    from pathlib import Path
+
+    from openseed.services.sharing import export_session, save_export
+
+    lib = get_library(ctx)
+    session = lib.get_research_session(session_id)
+    if not session:
+        console.print(f"[red]Session not found: {session_id}[/red]")
+        raise SystemExit(1)
+    bundle = export_session(session, lib)
+    dest = Path(out_path) if out_path else Path(f"session_{session_id}.json")
+    save_export(bundle, dest)
+    n = len(bundle["papers"])
+    console.print(f"[green]✓[/green] Exported session with {n} papers → [bold]{dest}[/bold]")
+
+
+@research.command("import")
+@click.argument("path")
+@click.pass_context
+def import_session_cmd(ctx: click.Context, path: str) -> None:
+    """Import a shared research session from a JSON file."""
+    from pathlib import Path
+
+    from openseed.services.sharing import import_session, load_export
+
+    lib = get_library(ctx)
+    file_path = Path(path)
+    if not file_path.exists():
+        console.print(f"[red]File not found: {path}[/red]")
+        raise SystemExit(1)
+    bundle = load_export(file_path)
+    session, added = import_session(bundle, lib)
+    console.print(f"[green]✓[/green] Imported session: [bold]{session.topic}[/bold]")
+    console.print(f"   Papers added: {added}  •  Session ID: {session.id}")

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Digests{% endblock %}
+{% block content %}
+<h1>Watch Digests</h1>
+{% if digests %}
+{% for d in digests %}
+<div class="card">
+    <h2>{{ d.name }}</h2>
+    <div class="digest-content">{{ d.content }}</div>
+</div>
+{% endfor %}
+{% else %}
+<p style="color: var(--dim);">No digests yet. Run <code>openseed watch run</code> to generate one.</p>
+{% endif %}
+{% endblock %}

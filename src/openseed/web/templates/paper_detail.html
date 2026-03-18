@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title_suffix %} — {{ paper.title[:50] }}{% endblock %}
+{% block content %}
+<h1>{{ paper.title }}</h1>
+<div style="margin-bottom: 16px;">
+    <span class="badge badge-{{ paper.status }}">{{ paper.status }}</span>
+    {% for t in paper.tags %}<span class="tag">{{ t.name }}</span>{% endfor %}
+</div>
+<div class="card">
+    <h2>Details</h2>
+    <p><strong>Authors:</strong> {{ paper.authors | map(attribute='name') | join(', ') or 'Unknown' }}</p>
+    <p><strong>ArXiv:</strong> {% if paper.arxiv_id %}<a href="https://arxiv.org/abs/{{ paper.arxiv_id }}" target="_blank">{{ paper.arxiv_id }}</a>{% else %}N/A{% endif %}</p>
+    <p><strong>Added:</strong> {{ paper.added_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    {% if paper.note %}<p><strong>Note:</strong> {{ paper.note }}</p>{% endif %}
+</div>
+{% if paper.abstract %}
+<div class="card">
+    <h2>Abstract</h2>
+    <div class="summary">{{ paper.abstract }}</div>
+</div>
+{% endif %}
+{% if paper.summary %}
+<div class="card">
+    <h2>AI Summary</h2>
+    <div class="summary">{{ paper.summary }}</div>
+</div>
+{% endif %}
+{% if neighbors %}
+<div class="card">
+    <h2>Connected Papers</h2>
+    <table>
+        <thead><tr><th>Paper</th><th>Relation</th></tr></thead>
+        <tbody>
+        {% for n in neighbors %}
+            <tr>
+                <td><a href="/papers/{{ n.paper.id }}">{{ n.paper.title }}</a></td>
+                <td style="color: var(--dim);">{{ n.edge_type }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -60,9 +60,13 @@ OpenSeed is an AI-powered research workflow CLI. It manages a local paper librar
 | `services/digest.py` | Digest generation (markdown summary of watch results) |
 | `storage/migrate.py` | JSON → SQLite auto-migration |
 | `agent/reader.py` | PaperReader — structured summarize/analyze via Claude |
+| `agent/discovery.py` | Paper discovery — Claude search + S2 enrichment |
 | `agent/compare.py` | Paper comparison — structured side-by-side analysis |
 | `agent/latex.py` | LaTeX related-work export with BibTeX |
 | `agent/assistant.py` | ResearchAssistant — freeform ask/review via Claude |
+| `services/rss.py` | RSS/Atom feed discovery |
+| `services/sharing.py` | Research session export/import for collaboration |
+| `web/app.py` | FastAPI web dashboard |
 | `auth.py` | `make_anthropic_client()`, `has_anthropic_auth()`, `run_claude_setup_token()` |
 | `doctor.py` | Environment health checks with `CheckResult` + fix hints |
 | `config.py` | `OpenSeedConfig`, paths, default model |

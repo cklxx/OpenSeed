@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="stats">
+    <div class="stat">
+        <div class="number">{{ stats.total }}</div>
+        <div class="label">Papers</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ stats.unread }}</div>
+        <div class="label">Unread</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ stats.reading }}</div>
+        <div class="label">Reading</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ stats.read }}</div>
+        <div class="label">Read</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ stats.edges }}</div>
+        <div class="label">Graph Edges</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ stats.clusters }}</div>
+        <div class="label">Clusters</div>
+    </div>
+</div>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <a href="/papers" class="card"><h2>Browse Papers</h2><p style="color: var(--dim);">View and search your library</p></a>
+    <a href="/graph" class="card"><h2>Knowledge Graph</h2><p style="color: var(--dim);">Explore paper connections</p></a>
+    <a href="/digests" class="card"><h2>Watch Digests</h2><p style="color: var(--dim);">Recent paper discoveries</p></a>
+    <a href="/sessions" class="card"><h2>Research Sessions</h2><p style="color: var(--dim);">Autonomous research runs</p></a>
+</div>
+{% endblock %}

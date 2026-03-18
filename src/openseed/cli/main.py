@@ -138,6 +138,20 @@ def doctor() -> None:
         raise SystemExit(1)
 
 
+@cli.command()
+@click.option("--port", default=8765, show_default=True, help="Port to serve on.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind to.")
+def web(port: int, host: str) -> None:
+    """Start the OpenSeed web dashboard."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn not installed.[/red] Run: pip install openseed[web]")
+        raise SystemExit(1)
+    console.print(f"[green]✓[/green] Starting web dashboard at http://{host}:{port}")
+    uvicorn.run("openseed.web.app:app", host=host, port=port, log_level="warning")
+
+
 cli.add_command(paper)
 cli.add_command(experiment)
 cli.add_command(agent)

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Knowledge Graph{% endblock %}
+{% block content %}
+<h1>Knowledge Graph</h1>
+<div class="stats" style="margin-bottom: 24px;">
+    <div class="stat"><div class="number">{{ nodes | length }}</div><div class="label">Connected Papers</div></div>
+    <div class="stat"><div class="number">{{ edges | length }}</div><div class="label">Edges</div></div>
+    <div class="stat"><div class="number">{{ clusters | length }}</div><div class="label">Clusters</div></div>
+</div>
+{% if clusters %}
+{% for cluster in clusters %}
+<div class="cluster-box">
+    <h2>Cluster {{ loop.index }} ({{ cluster | length }} papers)</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;">
+    {% for pid in cluster %}
+        {% set p = paper_map.get(pid) %}
+        {% if p %}
+        <a href="/papers/{{ p.id }}" class="graph-node">
+            {{ p.title[:35] }}{% if p.title | length > 35 %}…{% endif %}
+        </a>
+        {% else %}
+        <span class="graph-node" style="color: var(--dim);">{{ pid }}</span>
+        {% endif %}
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% if edges %}
+<div class="card" style="margin-top: 16px;">
+    <h2>All Edges</h2>
+    <table>
+        <thead><tr><th>From</th><th>To</th><th>Type</th></tr></thead>
+        <tbody>
+        {% for e in edges %}
+            {% set src = paper_map.get(e.source) %}
+            {% set tgt = paper_map.get(e.target) %}
+            <tr>
+                <td>{% if src %}<a href="/papers/{{ src.id }}">{{ src.title[:30] }}</a>{% else %}{{ e.source }}{% endif %}</td>
+                <td>{% if tgt %}<a href="/papers/{{ tgt.id }}">{{ tgt.title[:30] }}</a>{% else %}{{ e.target }}{% endif %}</td>
+                <td style="color: var(--dim);">{{ e.edge_type }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% else %}
+<p style="color: var(--dim);">No connections in the knowledge graph yet. Summarize papers to build connections.</p>
+{% endif %}
+{% endblock %}
