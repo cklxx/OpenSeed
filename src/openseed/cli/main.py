@@ -16,6 +16,7 @@ from openseed.cli.agent import agent, ask
 from openseed.cli.experiment import experiment
 from openseed.cli.paper import paper
 from openseed.cli.research import research
+from openseed.cli.version import version_group
 from openseed.config import ensure_dirs, load_config, save_config
 from openseed.doctor import render_results, run_checks
 
@@ -157,3 +158,4 @@ cli.add_command(experiment)
 cli.add_command(agent)
 cli.add_command(research)
 cli.add_command(ask, name="ask")
+cli.add_command(version_group)
