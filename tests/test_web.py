@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from openseed.config import OpenSeedConfig
 from openseed.models.paper import Author, Paper, Tag
 from openseed.storage.library import PaperLibrary
+from openseed.web.app import app, get_lib
 
 
 @pytest.fixture
@@ -46,16 +47,13 @@ def lib(tmp_path: Path) -> PaperLibrary:
 def client(lib: PaperLibrary, tmp_path: Path) -> TestClient:
     config = OpenSeedConfig(library_dir=lib._dir, config_dir=tmp_path / "config")
 
-    def mock_lib():
-        return lib
+    def override_get_lib():
+        yield lib
 
-    with (
-        patch("openseed.web.app._lib", mock_lib),
-        patch("openseed.web.app.load_config", return_value=config),
-    ):
-        from openseed.web.app import app
-
+    app.dependency_overrides[get_lib] = override_get_lib
+    with patch("openseed.web.app.load_config", return_value=config):
         yield TestClient(app)
+    app.dependency_overrides.clear()
 
 
 class TestWebDashboard:
@@ -103,24 +101,31 @@ class TestWebDashboard:
     def test_graph_empty_library(self, tmp_path: Path) -> None:
         empty_lib = PaperLibrary(tmp_path / "empty")
 
-        with patch("openseed.web.app._lib", return_value=empty_lib):
-            from openseed.web.app import app
+        def override():
+            yield empty_lib
 
+        app.dependency_overrides[get_lib] = override
+        try:
             c = TestClient(app)
             resp = c.get("/graph")
+        finally:
+            app.dependency_overrides.clear()
         assert resp.status_code == 200
 
     def test_graph_isolated_nodes_excluded(self, tmp_path: Path) -> None:
         """Papers with no edges should not appear as graph nodes."""
         lib = PaperLibrary(tmp_path / "iso")
-        lib.add_paper(
-            Paper(id="x1", title="Isolated Paper", authors=[], abstract="No edges here.")
-        )
-        with patch("openseed.web.app._lib", return_value=lib):
-            from openseed.web.app import app
+        lib.add_paper(Paper(id="x1", title="Isolated Paper", authors=[], abstract="No edges here."))
 
+        def override():
+            yield lib
+
+        app.dependency_overrides[get_lib] = override
+        try:
             c = TestClient(app)
             resp = c.get("/graph")
+        finally:
+            app.dependency_overrides.clear()
         assert resp.status_code == 200
 
     def test_digests_empty(self, client: TestClient) -> None:
@@ -132,3 +137,38 @@ class TestWebDashboard:
         resp = client.get("/sessions")
         assert resp.status_code == 200
         assert "No research sessions yet" in resp.text
+
+
+class TestAuthMiddleware:
+    def test_no_api_key_set_allows_access(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.delenv("OPENSEED_API_KEY", raising=False)
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+    def test_valid_bearer_token_allows_access(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv("OPENSEED_API_KEY", "secret123")
+        resp = client.get("/", headers={"Authorization": "Bearer secret123"})
+        assert resp.status_code == 200
+
+    def test_missing_auth_header_returns_401(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv("OPENSEED_API_KEY", "secret123")
+        resp = client.get("/")
+        assert resp.status_code == 401
+        assert "API key" in resp.json()["error"]
+
+    def test_wrong_token_returns_401(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv("OPENSEED_API_KEY", "secret123")
+        resp = client.get("/", headers={"Authorization": "Bearer wrongkey"})
+        assert resp.status_code == 401
+
+    def test_all_routes_protected_when_key_set(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.setenv("OPENSEED_API_KEY", "mykey")
+        for path in ["/", "/papers", "/graph", "/digests", "/sessions"]:
+            resp = client.get(path)
+            assert resp.status_code == 401, f"Expected 401 for {path}"
+
+    def test_all_routes_open_when_key_unset(self, client: TestClient, monkeypatch) -> None:
+        monkeypatch.delenv("OPENSEED_API_KEY", raising=False)
+        for path in ["/", "/papers", "/graph", "/digests", "/sessions"]:
+            resp = client.get(path)
+            assert resp.status_code == 200, f"Expected 200 for {path}"

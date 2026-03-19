@@ -2,29 +2,58 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from openseed.config import load_config
 from openseed.storage.library import PaperLibrary
+from openseed.storage.pool import LibraryPool
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-app = FastAPI(title="OpenSeed", docs_url=None, redoc_url=None)
+_pool: LibraryPool | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _pool
+    _pool = LibraryPool(load_config().library_dir)
+    yield
+    if _pool is not None:
+        _pool.close()
+
+
+app = FastAPI(title="OpenSeed", docs_url=None, redoc_url=None, lifespan=lifespan)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
-def _lib() -> PaperLibrary:
-    config = load_config()
-    return PaperLibrary(config.library_dir)
+@app.middleware("http")
+async def _auth(request: Request, call_next):
+    """Enforce API key auth when OPENSEED_API_KEY is set; open access otherwise."""
+    api_key = os.environ.get("OPENSEED_API_KEY")
+    if not api_key:
+        return await call_next(request)
+    auth = request.headers.get("Authorization", "")
+    if auth == f"Bearer {api_key}":
+        return await call_next(request)
+    return JSONResponse({"error": "Invalid or missing API key"}, status_code=401)
+
+
+def get_lib() -> Iterator[PaperLibrary]:
+    """FastAPI dependency: borrow a PaperLibrary from the pool."""
+    assert _pool is not None, "LibraryPool not initialized"
+    with _pool.acquire() as lib:
+        yield lib
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    lib = _lib()
+async def index(request: Request, lib: PaperLibrary = Depends(get_lib)):
     papers = lib.list_papers()
     stats = {
         "total": len(papers),
@@ -38,12 +67,13 @@ async def index(request: Request):
 
 
 @app.get("/papers", response_class=HTMLResponse)
-async def papers_list(request: Request, status: str | None = None, q: str | None = None):
-    lib = _lib()
-    if q:
-        papers = lib.search_papers(q)
-    else:
-        papers = lib.list_papers()
+async def papers_list(
+    request: Request,
+    lib: PaperLibrary = Depends(get_lib),
+    status: str | None = None,
+    q: str | None = None,
+):
+    papers = lib.search_papers(q) if q else lib.list_papers()
     if status:
         papers = [p for p in papers if p.status == status]
     return templates.TemplateResponse(
@@ -52,8 +82,7 @@ async def papers_list(request: Request, status: str | None = None, q: str | None
 
 
 @app.get("/papers/{paper_id}", response_class=HTMLResponse)
-async def paper_detail(request: Request, paper_id: str):
-    lib = _lib()
+async def paper_detail(request: Request, paper_id: str, lib: PaperLibrary = Depends(get_lib)):
     paper = lib.get_paper(paper_id)
     if not paper:
         return HTMLResponse("<h1>Paper not found</h1>", status_code=404)
@@ -69,8 +98,7 @@ async def paper_detail(request: Request, paper_id: str):
 
 
 @app.get("/graph", response_class=HTMLResponse)
-async def graph_view(request: Request):
-    lib = _lib()
+async def graph_view(request: Request, lib: PaperLibrary = Depends(get_lib)):
     papers = lib.list_papers()
     edges = lib.list_all_edges()
     clusters = lib.get_clusters()
@@ -100,7 +128,6 @@ async def digests_list(request: Request):
 
 
 @app.get("/sessions", response_class=HTMLResponse)
-async def sessions_list(request: Request):
-    lib = _lib()
+async def sessions_list(request: Request, lib: PaperLibrary = Depends(get_lib)):
     sessions = lib.list_research_sessions()
     return templates.TemplateResponse(request, "sessions.html", {"sessions": sessions})
