@@ -17,7 +17,7 @@ def lib(tmp_path):
     p = Paper(
         title="Attention Is All You Need",
         authors=[Author(name="Vaswani")],
-        abstract="Transformer architecture.",
+        abstract="Transformer architecture. " * 50,  # long enough to trigger truncation
         arxiv_id="1706.03762",
     )
     library.add_paper(p)
@@ -30,19 +30,22 @@ def patch_lib(lib):
         yield
 
 
-def test_search_papers_returns_json():
+def test_search_papers_returns_paginated():
     from openseed.mcp.server import search_papers
 
     result = json.loads(search_papers("attention"))
-    assert isinstance(result, list)
-    assert any("Attention" in p["title"] for p in result)
+    assert "items" in result
+    assert "total" in result
+    assert "has_more" in result
+    assert any("Attention" in p["title"] for p in result["items"])
 
 
 def test_search_papers_empty():
     from openseed.mcp.server import search_papers
 
     result = json.loads(search_papers("nonexistent_xyz_query"))
-    assert result == []
+    assert result["items"] == []
+    assert result["total"] == 0
 
 
 def test_get_paper_found(lib):
@@ -51,6 +54,19 @@ def test_get_paper_found(lib):
     paper_id = lib.list_papers()[0].id
     result = json.loads(get_paper(paper_id))
     assert result["title"] == "Attention Is All You Need"
+    assert "abstract" in result
+    assert "summary" in result
+
+
+def test_get_paper_truncation(lib):
+    from openseed.mcp.server import get_paper
+
+    paper_id = lib.list_papers()[0].id
+    result = json.loads(get_paper(paper_id))
+    assert result.get("abstract_truncated") is True
+    full = json.loads(get_paper(paper_id, section="abstract"))
+    assert "abstract_truncated" not in full
+    assert len(full["abstract"]) > len(result["abstract"])
 
 
 def test_get_paper_not_found():
@@ -60,20 +76,22 @@ def test_get_paper_not_found():
     assert "error" in result
 
 
-def test_list_papers_all():
+def test_list_papers_paginated():
     from openseed.mcp.server import list_papers
 
     result = json.loads(list_papers())
-    assert len(result) == 1
+    assert result["total"] == 1
+    assert len(result["items"]) == 1
+    assert result["has_more"] is False
 
 
 def test_list_papers_filter_status():
     from openseed.mcp.server import list_papers
 
     result = json.loads(list_papers(status="unread"))
-    assert len(result) == 1
+    assert result["total"] == 1
     result = json.loads(list_papers(status="read"))
-    assert len(result) == 0
+    assert result["total"] == 0
 
 
 def test_get_graph():
@@ -83,11 +101,12 @@ def test_get_graph():
     assert isinstance(result, list)
 
 
-def test_search_memories():
+def test_search_memories_paginated():
     from openseed.mcp.server import search_memories
 
     result = json.loads(search_memories("attention"))
-    assert isinstance(result, list)
+    assert "items" in result
+    assert "total" in result
 
 
 @patch("openseed.agent.assistant._ask")
