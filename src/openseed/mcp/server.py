@@ -47,45 +47,53 @@ def _truncate(text: str, limit: int) -> tuple[str, bool]:
     return text[:limit].rsplit(" ", 1)[0] + "…", True
 
 
+def _compact(d: dict) -> dict:
+    """Remove keys whose values are empty strings, empty lists, or None."""
+    return {k: v for k, v in d.items() if v not in ("", [], None)}
+
+
 def _paper_brief(p) -> dict:
     """Compact paper representation for list views."""
     tags = [t.name for t in p.tags] if p.tags else []
-    return {
-        "id": p.id,
-        "title": p.title,
-        "arxiv_id": p.arxiv_id,
-        "status": p.status,
-        "tags": tags,
-    }
+    return _compact(
+        {
+            "id": p.id,
+            "title": p.title,
+            "arxiv_id": p.arxiv_id,
+            "status": p.status,
+            "tags": tags,
+        }
+    )
+
+
+def _add_text_field(result: dict, key: str, text: str, limit: int, full: bool) -> None:
+    """Add a text field, truncating if needed unless full=True."""
+    if not text:
+        return
+    if full:
+        result[key] = text
+        return
+    truncated_text, was_truncated = _truncate(text, limit)
+    result[key] = truncated_text
+    if was_truncated:
+        result[f"{key}_truncated"] = True
 
 
 def _paper_detail(p, section: str | None = None) -> dict:
     """Paper detail with progressive disclosure of long fields."""
     authors = [a.name for a in p.authors] if p.authors else []
-    result: dict = {
-        "id": p.id,
-        "title": p.title,
-        "arxiv_id": p.arxiv_id,
-        "authors": authors,
-        "status": p.status,
-        "tags": [t.name for t in p.tags] if p.tags else [],
-    }
-    abstract = p.abstract or ""
-    summary = p.summary or ""
-    if section in ("abstract", "full"):
-        result["abstract"] = abstract
-    else:
-        text, truncated = _truncate(abstract, 500)
-        result["abstract"] = text
-        if truncated:
-            result["abstract_truncated"] = True
-    if section in ("summary", "full"):
-        result["summary"] = summary
-    else:
-        text, truncated = _truncate(summary, 1000)
-        result["summary"] = text
-        if truncated:
-            result["summary_truncated"] = True
+    result: dict = _compact(
+        {
+            "id": p.id,
+            "title": p.title,
+            "arxiv_id": p.arxiv_id,
+            "authors": authors,
+            "status": p.status,
+            "tags": [t.name for t in p.tags] if p.tags else [],
+        }
+    )
+    _add_text_field(result, "abstract", p.abstract or "", 500, section in ("abstract", "full"))
+    _add_text_field(result, "summary", p.summary or "", 1000, section in ("summary", "full"))
     return result
 
 

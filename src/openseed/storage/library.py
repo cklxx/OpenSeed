@@ -255,9 +255,11 @@ class PaperLibrary:
                 "WHERE papers_fts MATCH ? ORDER BY rank",
                 (fts_query,),
             ).fetchall()
-            return [_row_to_paper(r[0]) for r in rows]
+            if rows:
+                return [_row_to_paper(r[0]) for r in rows]
         except sqlite3.OperationalError:
-            return self._fallback_search(tokens)
+            pass
+        return self._fallback_search(tokens)
 
     def _fallback_search(self, tokens: list[str]) -> list[Paper]:
         """Token-based search when FTS fails (e.g. special characters)."""
@@ -274,6 +276,20 @@ class PaperLibrary:
         low = [t.lower() for t in tokens]
         matches = [p for p in self.list_papers() if all(t in _text(p) for t in low)]
         return sorted(matches, key=_score, reverse=True)
+
+    def rebuild_fts(self) -> int:
+        """Re-index all papers into FTS — call when FTS is out of sync."""
+        self._conn.execute("DELETE FROM papers_fts")
+        rows = self._conn.execute("SELECT rowid, data FROM papers").fetchall()
+        for rowid, data in rows:
+            paper = _row_to_paper(data)
+            self._conn.execute(
+                "INSERT INTO papers_fts(rowid, title, abstract, summary, authors, tags) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (rowid, *_fts_text(paper)),
+            )
+        self._conn.commit()
+        return len(rows)
 
     # ── Experiments ───────────────────────────────────────────
 
