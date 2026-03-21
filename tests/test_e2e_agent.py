@@ -196,3 +196,41 @@ def test_pipeline_adds_and_analyzes(mock_ask, runner, env, lib):
         catch_exceptions=False,
     )
     assert r.exit_code == 0
+
+
+# ── gaps ──────────────────────────────────────────────────────────────────────
+
+
+@patch("openseed.agent.reader._ask")
+def test_gaps_empty_library(mock_ask, runner, env):
+    r = _invoke(runner, ["agent", "gaps"], env)
+    assert r.exit_code == 0
+    assert "No papers" in r.output
+
+
+@patch("openseed.agent.reader._ask")
+def test_gaps_with_papers(mock_ask, runner, env, lib):
+    mock_ask.return_value = "[]"
+    p = Paper(title="Paper A", abstract="attention", arxiv_id="1000.00001")
+    lib.add_paper(p)
+    r = _invoke(runner, ["agent", "gaps"], env)
+    assert r.exit_code == 0
+
+
+# ── reading-order ─────────────────────────────────────────────────────────────
+
+
+@patch("openseed.agent.reader._ask")
+def test_reading_order_no_papers(mock_ask, runner, env):
+    r = _invoke(runner, ["agent", "reading-order", "attention"], env)
+    assert r.exit_code == 0
+    assert "No papers" in r.output
+
+
+@patch("openseed.agent.reader._ask")
+def test_reading_order_with_papers(mock_ask, runner, env, lib):
+    mock_ask.return_value = "[]"
+    p = Paper(title="Attention Paper", abstract="attention mechanisms", arxiv_id="1000.00001")
+    lib.add_paper(p)
+    r = _invoke(runner, ["agent", "reading-order", "attention"], env)
+    assert r.exit_code == 0

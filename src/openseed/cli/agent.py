@@ -23,6 +23,7 @@ from openseed.agent.reader import (
     generate_experiment_code,
     synthesize_papers,
 )
+from openseed.agent.strategy import ResearchStrategy
 from openseed.auth import has_anthropic_auth
 from openseed.cli._helpers import (
     get_config,
@@ -82,7 +83,9 @@ def ask(ctx: click.Context, question: str) -> None:
     """Ask a research question."""
     _require_auth()
     config = get_config(ctx)
-    answer = ResearchAssistant(model=config.default_model).ask(question)
+    lib = get_library(ctx)
+    assistant = ResearchAssistant(library=lib, model=config.default_model)
+    answer = assistant.ask(question)
     console.print(Panel(Markdown(answer), title="Answer", border_style="blue"))
 
 
@@ -117,8 +120,97 @@ def review(ctx: click.Context, paper_id: str) -> None:
     lib = get_library(ctx)
     p = require_paper(lib, paper_id)
     config = get_config(ctx)
-    review_text = ResearchAssistant(model=config.default_model).review_paper(p)
+    review_text = ResearchAssistant(library=lib, model=config.default_model).review_paper(p)
     console.print(Panel(Markdown(review_text), title=f"Review: {p.title}", border_style="yellow"))
+
+
+def _chat_repl(assistant: ResearchAssistant, debug: bool) -> None:
+    """Interactive REPL loop for multi-turn research chat."""
+    console.print("[dim]Type /quit to exit, /clear to reset history, /debug to toggle debug.[/dim]")
+    while True:
+        try:
+            question = console.input("[bold cyan]> [/bold cyan]")
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not question.strip():
+            continue
+        if question.strip() == "/quit":
+            break
+        if question.strip() == "/clear":
+            assistant.clear_history()
+            console.print("[dim]History cleared.[/dim]")
+            continue
+        if question.strip() == "/debug":
+            debug = not debug
+            console.print(f"[dim]Debug {'on' if debug else 'off'}.[/dim]")
+            continue
+        if debug:
+            info = assistant.get_debug_info()
+            if info:
+                console.print(f"[dim]Context: {info}[/dim]")
+        for chunk in assistant.stream(question):
+            console.print(chunk, end="")
+        console.print()
+
+
+@agent.command()
+@click.option("--debug", is_flag=True, help="Show context retrieval details.")
+@click.pass_context
+def chat(ctx: click.Context, debug: bool) -> None:
+    """Interactive multi-turn research conversation."""
+    _require_auth()
+    config = get_config(ctx)
+    lib = get_library(ctx)
+    assistant = ResearchAssistant(library=lib, model=config.default_model)
+    _chat_repl(assistant, debug)
+
+
+@agent.command()
+@click.pass_context
+def gaps(ctx: click.Context) -> None:
+    """Analyze research gaps in your library."""
+    _require_auth()
+    config = get_config(ctx)
+    lib = get_library(ctx)
+    with console.status("[cyan]Analyzing gaps…[/cyan]"):
+        results = ResearchStrategy(lib, model=config.default_model).analyze_gaps()
+    if not results:
+        console.print("[yellow]No papers in library to analyze.[/yellow]")
+        return
+    table = Table(title="Research Gaps", show_lines=True)
+    table.add_column("Cluster", style="bold", max_width=20)
+    table.add_column("Papers", justify="right", width=8)
+    table.add_column("Gap", max_width=40)
+    table.add_column("Suggested Queries", max_width=30)
+    table.add_column("Confidence", justify="right", width=10)
+    for gap in results:
+        queries = ", ".join(gap.suggested_queries[:3])
+        table.add_row(
+            gap.cluster_name,
+            str(gap.paper_count),
+            gap.gap_description,
+            queries,
+            f"{gap.confidence:.0%}",
+        )
+    console.print(table)
+
+
+@agent.command("reading-order")
+@click.argument("topic")
+@click.pass_context
+def reading_order(ctx: click.Context, topic: str) -> None:
+    """Suggest reading order for papers on a topic."""
+    _require_auth()
+    config = get_config(ctx)
+    lib = get_library(ctx)
+    with console.status("[cyan]Analyzing reading order…[/cyan]"):
+        recs = ResearchStrategy(lib, model=config.default_model).suggest_reading_order(topic)
+    if not recs:
+        console.print(f"[yellow]No papers found for topic '{topic}'.[/yellow]")
+        return
+    for rec in recs:
+        console.print(f"  [bold cyan]{rec.priority}.[/bold cyan] [bold]{rec.paper.title}[/bold]")
+        console.print(f"     [dim]{rec.reason}[/dim]")
 
 
 def _extract_arxiv_ids(text: str) -> list[str]:

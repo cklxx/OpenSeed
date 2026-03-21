@@ -153,6 +153,17 @@ def web(port: int, host: str) -> None:
     uvicorn.run("openseed.web.app:app", host=host, port=port, log_level="warning")
 
 
+@cli.command()
+def mcp() -> None:
+    """Start the OpenSeed MCP server (stdio transport)."""
+    try:
+        from openseed.mcp.server import run_mcp_server
+    except ImportError:
+        console.print("[red]mcp not installed.[/red] Run: pip install openseed[mcp]")
+        raise SystemExit(1)
+    run_mcp_server()
+
+
 cli.add_command(paper)
 cli.add_command(experiment)
 cli.add_command(agent)

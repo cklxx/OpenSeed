@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import queue
 import re
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable, Generator
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
-from claude_agent_sdk.types import AssistantMessage, ToolUseBlock
+from claude_agent_sdk.types import AssistantMessage, TextBlock, ToolUseBlock
 
 
 def _make_opts(model: str, system: str) -> ClaudeAgentOptions:
@@ -79,6 +80,64 @@ def _ask(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
         return ex.submit(_run).result()
+
+
+_SENTINEL = object()
+
+
+async def _stream_async(
+    model: str,
+    system: str,
+    prompt: str,
+    on_step: Callable[[str], None] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Async generator yielding text chunks from Claude streaming response."""
+    async for msg in query(prompt=prompt, options=_make_opts(model, system)):
+        if not isinstance(msg, AssistantMessage):
+            continue
+        for block in msg.content:
+            if isinstance(block, TextBlock):
+                yield block.text
+            elif isinstance(block, ToolUseBlock) and on_step:
+                on_step(_tool_label(block))
+
+
+def _run_stream_thread(
+    q: queue.Queue,
+    model: str,
+    system: str,
+    prompt: str,
+    on_step: Callable[[str], None] | None,
+) -> None:
+    """Run _stream_async in a fresh event loop, putting chunks into q."""
+
+    async def _drain() -> None:
+        async for chunk in _stream_async(model, system, prompt, on_step):
+            q.put(chunk)
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_drain())
+    finally:
+        loop.close()
+        q.put(_SENTINEL)
+
+
+def _stream(
+    model: str,
+    system: str,
+    prompt: str,
+    on_step: Callable[[str], None] | None = None,
+) -> Generator[str, None, None]:
+    """Sync generator yielding text chunks — bridges async via queue in thread."""
+    q: queue.Queue = queue.Queue()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        ex.submit(_run_stream_thread, q, model, system, prompt, on_step)
+        while True:
+            item = q.get()
+            if item is _SENTINEL:
+                break
+            yield item
 
 
 def auto_tag_paper(
