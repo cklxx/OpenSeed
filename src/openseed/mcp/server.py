@@ -16,12 +16,16 @@ _INSTRUCTIONS = """\
 OpenSeed manages a local research paper library with AI-powered analysis.
 
 Tool selection guide (cheapest first):
-1. library_stats → answer "how many papers" without listing anything
+1. library_stats → "how many papers", coverage overview
 2. search_papers / list_papers → find papers by keyword or browse
-3. get_paper → drill into one paper's details (previewed; use section param for full text)
-4. get_graph → citation/reference relationships between papers
+3. get_paper → paper details (previewed; use section param for full text)
+4. get_graph → citation/reference relationships
 5. search_memories → recall prior research conversations
-6. ask_research → LAST RESORT, synthesize across papers (expensive, calls Claude API)
+6. ask_research → LAST RESORT, synthesize across papers (calls Claude API)
+
+IMPORTANT: For tasks like comparing papers, summarizing themes, or answering \
+questions — fetch the papers with get_paper and reason over them yourself. \
+Only use ask_research when you cannot answer from the retrieved content alone.
 """
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -33,10 +37,19 @@ _lib: PaperLibrary | None = None
 _PAGE_SIZE = 20
 
 
+def _fts_is_stale(lib: PaperLibrary) -> bool:
+    """Check if FTS index is out of sync with papers table."""
+    fts = lib._conn.execute("SELECT COUNT(*) FROM papers_fts").fetchone()[0]
+    total = lib._conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+    return fts != total
+
+
 def _get_library() -> PaperLibrary:
     global _lib  # noqa: PLW0603
     if _lib is None:
         _lib = PaperLibrary(load_config().library_dir)
+        if _fts_is_stale(_lib):
+            _lib.rebuild_fts()
     return _lib
 
 
@@ -123,11 +136,15 @@ def library_stats() -> str:
         for t in p.tags:
             tags[t.name] += 1
     return json.dumps(
-        {
-            "total_papers": len(papers),
-            "by_status": dict(statuses),
-            "top_tags": dict(tags.most_common(10)),
-        }
+        _compact(
+            {
+                "total_papers": len(papers),
+                "by_status": dict(statuses),
+                "with_abstract": sum(1 for p in papers if p.abstract),
+                "with_summary": sum(1 for p in papers if p.summary),
+                "top_tags": dict(tags.most_common(10)) or None,
+            }
+        )
     )
 
 
