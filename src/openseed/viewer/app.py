@@ -50,8 +50,12 @@ async def view_file(file_path: str) -> HTMLResponse:
     resolved = (root / file_path).resolve()
     if not str(resolved).startswith(str(root)) or not resolved.is_file():
         return HTMLResponse(status_code=404, content="Not found")
+    rel_dir = str(Path(file_path).parent)
+    asset_prefix = "" if rel_dir == "." else rel_dir + "/"
     content = resolved.read_text(encoding="utf-8")
-    return HTMLResponse(_build_html(resolved.name, content, back_link=True))
+    return HTMLResponse(
+        _build_html(resolved.name, content, back_link=True, asset_prefix=asset_prefix)
+    )
 
 
 @app.get("/assets/{file_path:path}")
@@ -70,9 +74,11 @@ async def serve_local_asset(file_path: str) -> Response:
     return Response(content=resolved.read_bytes(), media_type=mime)
 
 
-def _build_html(filename: str, content: str, *, back_link: bool = False) -> str:
+def _build_html(
+    filename: str, content: str, *, back_link: bool = False, asset_prefix: str = ""
+) -> str:
     back = (
-        '<a href="/" style="text-decoration:none">← Index</a> <span class="sep">/</span>'
+        '<a href="/" style="text-decoration:none">\u2190 Index</a> <span class="sep">/</span>'
         if back_link
         else ""
     )
@@ -80,6 +86,7 @@ def _build_html(filename: str, content: str, *, back_link: bool = False) -> str:
         HTML_TEMPLATE.replace("{{FILENAME}}", filename)
         .replace("{{CONTENT}}", json.dumps(content))
         .replace("{{BACK_LINK}}", back)
+        .replace("{{ASSET_PREFIX}}", asset_prefix)
     )
 
 
@@ -294,14 +301,25 @@ body {
     background: var(--blockquote-bg);
 }
 
-/* Images */
-.content img {
+/* Images + figure captions */
+.content figure {
+    margin: 1.5em auto;
+    text-align: center;
+}
+.content figure img, .content img {
     max-width: 100%;
     height: auto;
     border-radius: 10px;
-    margin: 1.5em auto;
     display: block;
+    margin: 0 auto;
     box-shadow: var(--shadow);
+}
+.content figcaption {
+    font-family: "Inter", system-ui, sans-serif;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-top: 0.6em;
+    line-height: 1.4;
 }
 
 /* Horizontal rule */
@@ -391,11 +409,12 @@ body {
         return text;
     }
 
-    // Rewrite relative image paths to go through /assets/
+    // Rewrite relative image paths to go through /assets/ with correct prefix
+    const assetPrefix = '{{ASSET_PREFIX}}';
     function rewriteImages(html) {
         return html.replace(
             /(<img\s[^>]*src=")(?!https?:\/\/|data:|\/assets\/)([^"]+)(")/g,
-            '$1/assets/$2$3'
+            '$1/assets/' + assetPrefix + '$2$3'
         );
     }
 
@@ -414,6 +433,14 @@ body {
 
     let html = marked.parse(stashed);
     html = rewriteImages(html);
+
+    // Wrap images with alt text into <figure> with <figcaption>
+    html = html.replace(
+        /<img\s([^>]*?)alt="([^"]+)"([^>]*?)>/g,
+        (match, pre, alt, post) => {
+            return `<figure><img ${pre}alt="${alt}"${post}><figcaption>${alt}</figcaption></figure>`;
+        }
+    );
 
     // Restore math blocks
     html = html.replace(
